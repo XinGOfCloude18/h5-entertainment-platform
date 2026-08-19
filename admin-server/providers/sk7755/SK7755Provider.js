@@ -35,9 +35,10 @@ export class SK7755Provider extends BaseProvider {
 
   async getBalance(userAccount) {
     const result = await sk7755GetBalance(userAccount)
-    if (result.code === '0000') {
-      return parseFloat(result.result?.balance || 0)
+    if (result.code !== '0000') {
+      // Never report a zero balance for a failed lookup
+      throw new Error(result.message || 'SK7755 balance lookup failed (code ' + result.code + ')')
     }
-    return 0
+    return parseFloat(result.result?.balance || 0)
   }
 }

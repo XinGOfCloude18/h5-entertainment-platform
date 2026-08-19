@@ -5,7 +5,13 @@ export function getRecentGames() {
   try {
     const data = localStorage.getItem(STORAGE_KEY)
     return data ? JSON.parse(data) : []
-  } catch {
+  } catch (err) {
+    console.error('[recentBrowsing] unreadable stored history, resetting', err)
+    try {
+      localStorage.removeItem(STORAGE_KEY)
+    } catch (removeErr) {
+      console.error('[recentBrowsing] failed to clear stored history', removeErr)
+    }
     return []
   }
 }
@@ -26,15 +32,16 @@ export function addRecentGame(game) {
     })
     const trimmed = filtered.slice(0, MAX_ITEMS)
     localStorage.setItem(STORAGE_KEY, JSON.stringify(trimmed))
-  } catch {
-    // localStorage might be full or unavailable
+  } catch (err) {
+    // Non-fatal: localStorage might be full or unavailable
+    console.warn('[recentBrowsing] failed to store recent game', err)
   }
 }
 
 export function clearRecentGames() {
   try {
     localStorage.removeItem(STORAGE_KEY)
-  } catch {
-    // ignore
+  } catch (err) {
+    console.warn('[recentBrowsing] failed to clear recent games', err)
   }
 }

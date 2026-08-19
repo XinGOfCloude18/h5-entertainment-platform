@@ -100,7 +100,8 @@ onMounted(async () => {
       })
     }
   } catch (e) {
-    // Ignore
+    console.error('Failed to load compliance limits', e)
+    showToast({ message: e?.message || '限额加载失败', position: 'bottom' })
   }
 })
 

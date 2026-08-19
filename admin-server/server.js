@@ -9,6 +9,7 @@ import bcrypt from 'bcrypt'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import db, { initDB } from './db.js'
+import { logError, logWarn } from './logger.js'
 import h5Routes from './h5-routes.js'
 import ppRoutes from './pp-routes.js'
 import sk7755CallbackRouter from './services/sk7755/callbackRouter.js'
@@ -163,7 +164,7 @@ function auditLog(operator, action, target, detail, ip) {
       operator, action, target || '', detail || '', ip || '0.0.0.0'
     )
   } catch (err) {
-    console.error('[' + new Date().toISOString() + '] Audit log error:', err.message)
+    logError('auditLog', err)
   }
 }
 
@@ -499,6 +500,7 @@ app.get('/api/admin/members/:id/detail', authMiddleware, (req, res) => {
   try {
     devices = db.prepare('SELECT * FROM device_fingerprints WHERE user_id = ? ORDER BY last_seen DESC LIMIT 5').all(req.params.id)
   } catch (e) {
+    logWarn('memberDetail:devices', e)
     devices = []
   }
 
@@ -523,6 +525,7 @@ app.get('/api/admin/members/:id/detail', authMiddleware, (req, res) => {
       }))
     }
   } catch (e) {
+    logWarn('memberDetail:loginHistory', e)
     loginHistory = []
   }
 
@@ -531,6 +534,7 @@ app.get('/api/admin/members/:id/detail', authMiddleware, (req, res) => {
   try {
     bankCards = db.prepare('SELECT * FROM member_bank_cards WHERE member_id = ? ORDER BY id DESC').all(req.params.id)
   } catch (e) {
+    logWarn('memberDetail:bankCards', e)
     bankCards = []
   }
 
@@ -551,6 +555,7 @@ app.get('/api/admin/members/:id/detail', authMiddleware, (req, res) => {
       }
     }
   } catch (e) {
+    logWarn('memberDetail:vipProgress', e)
     vipProgress = null
   }
 
@@ -996,7 +1001,7 @@ app.get('/api/finance/deposit-channels', authMiddleware, (req, res) => {
 })
 
 // POST /api/finance/deposit-channels - Create deposit channel
-app.post('/api/finance/deposit-channels', authMiddleware, (req, res) => {
+app.post('/api/finance/deposit-channels', authMiddleware, (req, res, next) => {
   const { name, network, address, enabled } = req.body
   try {
     db.exec(`CREATE TABLE IF NOT EXISTS deposit_channels (
@@ -1013,12 +1018,12 @@ app.post('/api/finance/deposit-channels', authMiddleware, (req, res) => {
     auditLog(req.user.username, '添加充值通道', name, '添加通道: ' + name + ' (' + network + ')', req.ip || '0.0.0.0')
     res.json({ success: true, id: result.lastInsertRowid })
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    next(err)
   }
 })
 
 // PUT /api/finance/deposit-channels/:id - Update deposit channel
-app.put('/api/finance/deposit-channels/:id', authMiddleware, (req, res) => {
+app.put('/api/finance/deposit-channels/:id', authMiddleware, (req, res, next) => {
   const { name, network, address, enabled } = req.body
   try {
     db.exec(`CREATE TABLE IF NOT EXISTS deposit_channels (
@@ -1041,12 +1046,12 @@ app.put('/api/finance/deposit-channels/:id', authMiddleware, (req, res) => {
     )
     res.json({ success: true })
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    next(err)
   }
 })
 
 // DELETE /api/finance/deposit-channels/:id - Delete deposit channel
-app.delete('/api/finance/deposit-channels/:id', authMiddleware, (req, res) => {
+app.delete('/api/finance/deposit-channels/:id', authMiddleware, (req, res, next) => {
   try {
     db.exec(`CREATE TABLE IF NOT EXISTS deposit_channels (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1060,13 +1065,13 @@ app.delete('/api/finance/deposit-channels/:id', authMiddleware, (req, res) => {
     auditLog(req.user.username, '删除充值通道', req.params.id, '删除充值通道 #' + req.params.id, req.ip || '0.0.0.0')
     res.json({ success: true })
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    next(err)
   }
 })
 
 // ==================== PHASE 18A: GAME CATEGORY REVENUE ====================
 
-app.get('/api/finance/game-category-revenue', authMiddleware, (req, res) => {
+app.get('/api/finance/game-category-revenue', authMiddleware, (req, res, next) => {
   try {
     const categories = db.prepare(`
       SELECT g.category,
@@ -1089,7 +1094,7 @@ app.get('/api/finance/game-category-revenue', authMiddleware, (req, res) => {
     }))
     res.json(result)
   } catch (err) {
-    res.json([])
+    next(err)
   }
 })
 
@@ -1113,7 +1118,7 @@ app.get('/api/finance/financial-report/export', authMiddleware, (req, res) => {
 // This duplicate was removed to avoid routing conflicts.
 
 // GET /api/finance/balance-adjust-logs - Recent balance adjustment audit logs
-app.get('/api/finance/balance-adjust-logs', authMiddleware, (req, res) => {
+app.get('/api/finance/balance-adjust-logs', authMiddleware, (req, res, next) => {
   try {
     const rows = db.prepare(`SELECT * FROM audit_logs WHERE action IN ('手动增加余额', '手动扣减余额') ORDER BY time DESC LIMIT 50`).all()
     const logs = rows.map(r => {
@@ -1137,7 +1142,7 @@ app.get('/api/finance/balance-adjust-logs', authMiddleware, (req, res) => {
     })
     res.json(logs)
   } catch (err) {
-    res.json([])
+    next(err)
   }
 })
 
@@ -1341,62 +1346,62 @@ app.put('/api/games/:id/recommend', authMiddleware, validateRecommend, handleVal
 // ==================== SK7755 ADMIN ====================
 
 // GET /api/admin/sk7755/platforms — list all SK7755 platforms with status
-app.get('/api/admin/sk7755/platforms', authMiddleware, (req, res) => {
+app.get('/api/admin/sk7755/platforms', authMiddleware, (req, res, next) => {
   try {
     const platforms = getPlatforms()
     res.json(platforms)
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    next(err)
   }
 })
 
 // PUT /api/admin/sk7755/platforms/:code/toggle — enable/disable a platform
-app.put('/api/admin/sk7755/platforms/:code/toggle', authMiddleware, (req, res) => {
+app.put('/api/admin/sk7755/platforms/:code/toggle', authMiddleware, (req, res, next) => {
   try {
     const { enabled } = req.body
     togglePlatform(req.params.code, enabled)
     auditLog(req.user.username, 'SK7755平台' + (enabled ? '启用' : '禁用'), req.params.code, '', req.ip || '0.0.0.0')
     res.json({ success: true })
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    next(err)
   }
 })
 
 // GET /api/admin/sk7755/platforms/:code/games — games under a platform
-app.get('/api/admin/sk7755/platforms/:code/games', authMiddleware, (req, res) => {
+app.get('/api/admin/sk7755/platforms/:code/games', authMiddleware, (req, res, next) => {
   try {
     const games = getGamesByPlatform(req.params.code)
     res.json(games)
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    next(err)
   }
 })
 
 // PUT /api/admin/sk7755/games/toggle — enable/disable a single game
-app.put('/api/admin/sk7755/games/toggle', authMiddleware, (req, res) => {
+app.put('/api/admin/sk7755/games/toggle', authMiddleware, (req, res, next) => {
   try {
     const { platform, game_code, status } = req.body
     toggleGame(platform, game_code, status)
     auditLog(req.user.username, 'SK7755游戏' + status, `${platform}/${game_code}`, '', req.ip || '0.0.0.0')
     res.json({ success: true })
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    next(err)
   }
 })
 
 // POST /api/admin/sk7755/sync — trigger manual game sync
-app.post('/api/admin/sk7755/sync', authMiddleware, async (req, res) => {
+app.post('/api/admin/sk7755/sync', authMiddleware, async (req, res, next) => {
   try {
-    const count = await syncAll()
-    auditLog(req.user.username, 'SK7755手动同步', '', `同步了 ${count} 款游戏`, req.ip || '0.0.0.0')
-    res.json({ success: true, gameCount: count })
+    const { totalGames, failures } = await syncAll()
+    auditLog(req.user.username, 'SK7755手动同步', '', `同步了 ${totalGames} 款游戏, 失败平台: ${failures.length}`, req.ip || '0.0.0.0')
+    res.json({ success: failures.length === 0, gameCount: totalGames, failures })
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    next(err)
   }
 })
 
 // GET /api/admin/sk7755/bets — SK7755 bet records with pagination
-app.get('/api/admin/sk7755/bets', authMiddleware, (req, res) => {
+app.get('/api/admin/sk7755/bets', authMiddleware, (req, res, next) => {
   try {
     const { page = 1, pageSize = 20, search, platform, startDate, endDate } = req.query
     let where = []
@@ -1446,14 +1451,14 @@ app.get('/api/admin/sk7755/bets', authMiddleware, (req, res) => {
       pageSize: Number(pageSize),
     })
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    next(err)
   }
 })
 
 // ==================== GAME CATEGORIES (SK Productization) ====================
 
 // GET /api/admin/categories — all categories with game counts
-app.get('/api/admin/categories', authMiddleware, (req, res) => {
+app.get('/api/admin/categories', authMiddleware, (req, res, next) => {
   try {
     const cats = db.prepare('SELECT * FROM game_categories ORDER BY sort_order').all()
     const result = cats.map(c => {
@@ -1463,12 +1468,12 @@ app.get('/api/admin/categories', authMiddleware, (req, res) => {
     })
     res.json(result)
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    next(err)
   }
 })
 
 // POST /api/admin/categories — create category
-app.post('/api/admin/categories', authMiddleware, (req, res) => {
+app.post('/api/admin/categories', authMiddleware, (req, res, next) => {
   const { code, name_zh, name_en, icon, sort_order } = req.body
   if (!code || !name_zh || !name_en) return res.status(400).json({ error: 'code, name_zh, name_en required' })
   try {
@@ -1476,12 +1481,12 @@ app.post('/api/admin/categories', authMiddleware, (req, res) => {
     auditLog(req.user.username, '创建分类', code, name_zh, req.ip || '0.0.0.0')
     res.json({ success: true, id: result.lastInsertRowid })
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    next(err)
   }
 })
 
 // PUT /api/admin/categories/:id — update category
-app.put('/api/admin/categories/:id', authMiddleware, (req, res) => {
+app.put('/api/admin/categories/:id', authMiddleware, (req, res, next) => {
   const { name_zh, name_en, icon, sort_order, is_enabled } = req.body
   try {
     db.prepare(`UPDATE game_categories SET
@@ -1491,22 +1496,22 @@ app.put('/api/admin/categories/:id', authMiddleware, (req, res) => {
     ).run(name_zh, name_en, icon, sort_order, is_enabled !== undefined ? (is_enabled ? 1 : 0) : null, req.params.id)
     res.json({ success: true })
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    next(err)
   }
 })
 
 // DELETE /api/admin/categories/:id
-app.delete('/api/admin/categories/:id', authMiddleware, (req, res) => {
+app.delete('/api/admin/categories/:id', authMiddleware, (req, res, next) => {
   try {
     db.prepare('DELETE FROM game_categories WHERE id = ?').run(req.params.id)
     res.json({ success: true })
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    next(err)
   }
 })
 
 // GET /api/admin/sub-categories — sub-categories for a category
-app.get('/api/admin/sub-categories', authMiddleware, (req, res) => {
+app.get('/api/admin/sub-categories', authMiddleware, (req, res, next) => {
   const { category_id } = req.query
   try {
     const rows = category_id
@@ -1514,24 +1519,24 @@ app.get('/api/admin/sub-categories', authMiddleware, (req, res) => {
       : db.prepare('SELECT * FROM game_sub_categories ORDER BY category_id, sort_order').all()
     res.json(rows)
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    next(err)
   }
 })
 
 // POST /api/admin/sub-categories
-app.post('/api/admin/sub-categories', authMiddleware, (req, res) => {
+app.post('/api/admin/sub-categories', authMiddleware, (req, res, next) => {
   const { category_id, code, name_zh, name_en, icon, sort_order } = req.body
   if (!category_id || !code || !name_zh || !name_en) return res.status(400).json({ error: 'category_id, code, name_zh, name_en required' })
   try {
     const result = db.prepare('INSERT INTO game_sub_categories (category_id, code, name_zh, name_en, icon, sort_order) VALUES (?,?,?,?,?,?)').run(category_id, code, name_zh, name_en, icon || '', sort_order || 0)
     res.json({ success: true, id: result.lastInsertRowid })
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    next(err)
   }
 })
 
 // POST /api/admin/games/batch-categorize — batch assign category to games
-app.post('/api/admin/games/batch-categorize', authMiddleware, (req, res) => {
+app.post('/api/admin/games/batch-categorize', authMiddleware, (req, res, next) => {
   const { game_ids, category_id, table } = req.body
   if (!game_ids?.length || !category_id) return res.status(400).json({ error: 'game_ids and category_id required' })
   try {
@@ -1545,12 +1550,12 @@ app.post('/api/admin/games/batch-categorize', authMiddleware, (req, res) => {
     cacheInvalidate('h5:games')
     res.json({ success: true, count: game_ids.length })
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    next(err)
   }
 })
 
 // POST /api/admin/games/batch-update — batch set hot/new/visible
-app.post('/api/admin/games/batch-update', authMiddleware, (req, res) => {
+app.post('/api/admin/games/batch-update', authMiddleware, (req, res, next) => {
   const { game_ids, table, updates } = req.body
   if (!game_ids?.length || !updates) return res.status(400).json({ error: 'game_ids and updates required' })
   try {
@@ -1571,12 +1576,12 @@ app.post('/api/admin/games/batch-update', authMiddleware, (req, res) => {
     cacheInvalidate('admin:games')
     res.json({ success: true, count: game_ids.length })
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    next(err)
   }
 })
 
 // GET /api/admin/category-ggr — GGR by category for dashboard
-app.get('/api/admin/category-ggr', authMiddleware, (req, res) => {
+app.get('/api/admin/category-ggr', authMiddleware, (req, res, next) => {
   try {
     const cats = db.prepare('SELECT id, code, name_zh FROM game_categories ORDER BY sort_order').all()
     const catCodeMap = {}
@@ -1603,7 +1608,7 @@ app.get('/api/admin/category-ggr', authMiddleware, (req, res) => {
 
     res.json(result)
   } catch (err) {
-    res.status(500).json({ error: err.message })
+    next(err)
   }
 })
 
@@ -1618,7 +1623,7 @@ app.get('/api/admin/vip-levels', authMiddleware, (req, res) => {
     level: r.level,
     name: r.name,
     minPoints: r.min_points,
-    benefits: (() => { try { return JSON.parse(r.benefits_json || '[]') } catch { return [] } })(),
+    benefits: (() => { try { return JSON.parse(r.benefits_json || '[]') } catch (e) { logWarn('vipLevels:benefitsJson', e); return [] } })(),
     benefitsJson: r.benefits_json,
     rakebackBonus: r.rakeback_bonus,
     monthlyReview: r.monthly_review,
@@ -2371,11 +2376,7 @@ app.get('*', (req, res) => {
 
 // ==================== GLOBAL ERROR HANDLER ====================
 app.use((err, req, res, _next) => {
-  const timestamp = new Date().toISOString()
-  console.error('[' + timestamp + '] Error:', err.message)
-  if (NODE_ENV !== 'production') {
-    console.error(err.stack)
-  }
+  logError(req.method + ' ' + req.originalUrl, err)
 
   if (err.message === 'Not allowed by CORS') {
     return res.status(403).json({ error: 'CORS not allowed' })
@@ -2385,6 +2386,16 @@ app.use((err, req, res, _next) => {
   res.status(statusCode).json({
     error: NODE_ENV === 'production' ? '服务器内部错误' : err.message
   })
+})
+
+// Surface otherwise-invisible async failures instead of letting them vanish
+process.on('unhandledRejection', (reason) => {
+  logError('unhandledRejection', reason instanceof Error ? reason : new Error(String(reason)))
+})
+
+process.on('uncaughtException', (err) => {
+  logError('uncaughtException', err)
+  process.exit(1)
 })
 
 app.listen(PORT, () => {

@@ -2,6 +2,7 @@ import { Router } from 'express'
 import jwt from 'jsonwebtoken'
 import db from './db.js'
 import { getGameUrl, getCasinoGames, verifyCallbackHash } from './pp-integration.js'
+import { logError } from './logger.js'
 
 const router = Router()
 const H5_JWT_SECRET = process.env.H5_JWT_SECRET || 'dada-h5-jwt-secret-2024'
@@ -37,13 +38,14 @@ router.post('/games/launch', h5Auth, async (req, res) => {
       playMode: playMode || 'REAL',
       platform: 'WEB'
     })
-    if (result.error !== 0) {
-      return res.status(400).json({ error: 'Failed to get game URL', code: result.error, description: result.description })
+    if (String(result.error) !== '0' || !result.gameURL) {
+      logError('pp game launch', new Error('PP error ' + result.error + ': ' + (result.description || 'no gameURL')))
+      return res.status(502).json({ error: 'Failed to get game URL' })
     }
     res.json({ success: true, gameUrl: result.gameURL })
   } catch (err) {
-    console.error('PP game launch error:', err.message)
-    res.status(500).json({ error: 'Game launch failed' })
+    logError('pp game launch', err)
+    res.status(502).json({ error: 'Game launch failed' })
   }
 })
 
@@ -53,8 +55,8 @@ router.get('/games/list', async (req, res) => {
     const result = await getCasinoGames()
     res.json(result)
   } catch (err) {
-    console.error('PP games list error:', err.message)
-    res.status(500).json({ error: 'Failed to fetch games' })
+    logError('pp games list', err)
+    res.status(502).json({ error: 'Failed to fetch games' })
   }
 })
 

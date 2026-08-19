@@ -34,6 +34,7 @@ export const useGameStore = defineStore('game', () => {
   const loading = ref(false)
   const fetched = ref(false)
   const sk7755Fetched = ref(false)
+  const error = ref(null)
 
   const hotGames = computed(() => {
     const local = games.value.filter(g => g.hot || g.is_hot)
@@ -58,37 +59,50 @@ export const useGameStore = defineStore('game', () => {
 
   async function fetchGames(params = {}) {
     loading.value = true
+    error.value = null
     try {
-      const res = await getGamesApi(params)
-      const list = res?.list || res
-      if (Array.isArray(list) && list.length) {
-        if (!params.category && !params.search) {
-          games.value = list
-        }
-        fetched.value = true
+      // Both catalogues are fetched independently so one failing feed still
+      // yields a usable list; only a total failure is propagated.
+      const [main, sk] = await Promise.allSettled([
+        fetchMainGames(params),
+        fetchSK7755Games()
+      ])
+      const failures = [main, sk].filter(r => r.status === 'rejected').map(r => r.reason)
+      failures.forEach(e => console.error('Games API failed', e))
+      if (failures.length === 2) {
+        error.value = failures[0]
+        throw failures[0]
       }
-    } catch (e) {
-      console.warn('Games API failed', e)
+      if (failures.length) error.value = failures[0]
+      return games.value
+    } finally {
+      loading.value = false
     }
-    await fetchSK7755Games()
-    loading.value = false
+  }
+
+  async function fetchMainGames(params = {}) {
+    const res = await getGamesApi(params)
+    const list = res?.list || res
+    if (Array.isArray(list) && list.length) {
+      if (!params.category && !params.search) {
+        games.value = list
+      }
+      fetched.value = true
+    }
     return games.value
   }
 
   async function fetchSK7755Games() {
-    try {
-      const res = await getSK7755GamesApi()
-      const list = res?.list || []
-      if (Array.isArray(list)) {
-        sk7755Games.value = list.map(g => ({
-          ...g,
-          source: 'sk7755',
-        }))
-        sk7755Fetched.value = true
-      }
-    } catch (e) {
-      console.warn('SK7755 games API failed', e)
+    const res = await getSK7755GamesApi()
+    const list = res?.list || []
+    if (Array.isArray(list)) {
+      sk7755Games.value = list.map(g => ({
+        ...g,
+        source: 'sk7755',
+      }))
+      sk7755Fetched.value = true
     }
+    return sk7755Games.value
   }
 
   function getGameById(id) {
@@ -98,7 +112,7 @@ export const useGameStore = defineStore('game', () => {
   }
 
   return {
-    games, sk7755Games, categories, loading, hotGames,
+    games, sk7755Games, categories, loading, error, hotGames,
     getGamesByCategory, fetchGames, fetchSK7755Games, getGameById,
   }
 })

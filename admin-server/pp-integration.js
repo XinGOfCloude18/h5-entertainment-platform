@@ -35,9 +35,11 @@ export function calcHash(params) {
 }
 
 // ==================== HTTP REQUEST HELPER ====================
+const PP_TIMEOUT_MS = Number(process.env.PP_TIMEOUT_MS) || 15000
+
 function ppRequest(path, params) {
   if (!PP_CONFIGURED) {
-    return Promise.resolve({ error: '1', description: 'PP integration not configured. Set PP_SECRET and PP_SECURE_LOGIN env vars.' })
+    return Promise.reject(new Error('PP integration not configured. Set PP_SECRET and PP_SECURE_LOGIN env vars.'))
   }
   return new Promise((resolve, reject) => {
     const hash = calcHash(params)
@@ -58,14 +60,20 @@ function ppRequest(path, params) {
       let data = ''
       res.on('data', (chunk) => { data += chunk })
       res.on('end', () => {
+        if (res.statusCode >= 400) {
+          return reject(new Error('PP request ' + path + ' failed with HTTP ' + res.statusCode))
+        }
         try {
           resolve(JSON.parse(data))
         } catch (e) {
-          resolve({ error: '1', description: 'Invalid JSON response', raw: data })
+          reject(new Error('PP request ' + path + ' returned invalid JSON: ' + data.slice(0, 200)))
         }
       })
     })
     req.on('error', (e) => reject(e))
+    req.setTimeout(PP_TIMEOUT_MS, () => {
+      req.destroy(new Error('PP request ' + path + ' timed out after ' + PP_TIMEOUT_MS + 'ms'))
+    })
     req.write(body)
     req.end()
   })

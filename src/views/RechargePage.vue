@@ -81,7 +81,7 @@ async function onSubmit() {
   if (!amount.value || Number(amount.value) < 10) { showToast({ message: 'Min 10 USDT', type: 'fail' }); return }
   loading.value = true
   try { await walletStore.deposit(amount.value); showToast({ message: t('common.success'), type: 'success' }); amount.value = '' }
-  catch { showToast({ message: t('common.error'), type: 'fail' }) }
+  catch (e) { console.error('Deposit failed', e); showToast({ message: e?.message || t('common.error'), type: 'fail' }) }
   finally { loading.value = false }
 }
 </script>

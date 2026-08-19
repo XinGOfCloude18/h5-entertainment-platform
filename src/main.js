@@ -24,8 +24,8 @@ app.mount('#app')
 // Register service worker for PWA
 if ('serviceWorker' in navigator) {
   window.addEventListener('load', () => {
-    navigator.serviceWorker.register('/service-worker.js').catch(() => {
-      // Service worker registration failed silently
+    navigator.serviceWorker.register('/service-worker.js').catch((err) => {
+      console.error('[pwa] service worker registration failed', err)
     })
   })
 }
