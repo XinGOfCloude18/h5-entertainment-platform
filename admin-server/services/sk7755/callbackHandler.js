@@ -80,6 +80,22 @@ function updateMemberBalance(uid, newBalance) {
   return result.changes > 0
 }
 
+function findBet(orderNo) {
+  return db.prepare('SELECT * FROM sk7755_bets WHERE order_no = ?').get(orderNo)
+}
+
+function isValidAmount(value) {
+  const amount = Number(value)
+  return Number.isFinite(amount) && amount >= 0
+}
+
+// Amount fields are rejected unless they are finite and non-negative, so a
+// malformed payload cannot credit a player.
+function hasValidAmounts(body) {
+  return ['betAmount', 'subAmount', 'winAmount', 'addAmount', 'amount']
+    .every((field) => body[field] === undefined || body[field] === null || body[field] === '' || isValidAmount(body[field]))
+}
+
 function handleGetBalance(body) {
   const balance = getMemberBalance(body.uid)
   return {
@@ -97,6 +113,12 @@ function handleBet(body) {
 
   if (!orderNo) {
     return { code: '9999', message: 'Missing orderNo' }
+  }
+
+  // Replaying a bet must not debit the player twice.
+  const duplicate = findBet(orderNo)
+  if (duplicate) {
+    return { code: '0000', message: 'Success', balance: getMemberBalance(uid), currency: 'CNY' }
   }
 
   const currentBalance = getMemberBalance(uid)
@@ -161,12 +183,15 @@ function handleSettle(body) {
     return { code: '9999', message: 'Missing orderNo' }
   }
 
+  // Replaying a settle must not credit the winnings twice.
+  const existing = findBet(orderNo)
+  if (existing && existing.status === 'settled') {
+    return { code: '0000', message: 'Success', balance: getMemberBalance(uid), currency: 'CNY' }
+  }
+
   const currentBalance = getMemberBalance(uid)
   const newBalance = currentBalance + winAmount
   updateMemberBalance(uid, newBalance)
-
-  // Insert or update bet record
-  const existing = db.prepare('SELECT id FROM sk7755_bets WHERE order_no = ?').get(orderNo)
 
   if (existing) {
     db.prepare(`
@@ -228,6 +253,11 @@ function handleBetNSettle(body) {
 
   if (!orderNo) {
     return { code: '9999', message: 'Missing orderNo' }
+  }
+
+  const duplicate = findBet(orderNo)
+  if (duplicate) {
+    return { code: '0000', message: 'Success', balance: getMemberBalance(uid), currency: 'CNY' }
   }
 
   const currentBalance = getMemberBalance(uid)
@@ -325,6 +355,10 @@ export function processCallback(body) {
   const { action } = body
 
   console.log(`[SK7755 Callback] action=${action} uid=${body.uid || ''} orderNo=${body.orderNo || ''}`)
+
+  if (!hasValidAmounts(body)) {
+    return { code: '9999', message: 'Invalid amount' }
+  }
 
   switch (action) {
     case 'getBalance':

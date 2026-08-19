@@ -2,6 +2,7 @@ import { Router } from 'express'
 import jwt from 'jsonwebtoken'
 import bcrypt from 'bcrypt'
 import db from './db.js'
+import { H5_JWT_SECRET } from './secrets.js'
 import { getGameUrl } from './pp-integration.js'
 import { getCachedGames, CATEGORY_MAP } from './services/sk7755/gameSync.js'
 import { login as sk7755Login } from './services/sk7755/client.js'
@@ -42,8 +43,6 @@ function h5CacheGet(key) {
 function h5CacheSet(key, data, ttlMs) {
   h5Cache.set(key, { data, expiresAt: Date.now() + ttlMs })
 }
-
-const H5_JWT_SECRET = process.env.H5_JWT_SECRET || 'dada-h5-jwt-secret-2024'
 
 // ==================== H5 Auth Middleware ====================
 function h5Auth(req, res, next) {

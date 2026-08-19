@@ -9,6 +9,7 @@ import bcrypt from 'bcrypt'
 import path from 'path'
 import { fileURLToPath } from 'url'
 import db, { initDB } from './db.js'
+import { JWT_SECRET } from './secrets.js'
 import h5Routes from './h5-routes.js'
 import ppRoutes from './pp-routes.js'
 import sk7755CallbackRouter from './services/sk7755/callbackRouter.js'
@@ -21,7 +22,6 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const app = express()
 const PORT = process.env.PORT || 3001
 const NODE_ENV = process.env.NODE_ENV || 'development'
-const JWT_SECRET = process.env.JWT_SECRET || 'dada-platform-jwt-secret-2024'
 
 // ==================== IN-MEMORY CACHE ====================
 const cache = new Map()
@@ -94,17 +94,27 @@ const allowedOrigins = process.env.CORS_ORIGINS
   ? process.env.CORS_ORIGINS.split(',').map(s => s.trim())
   : ['http://localhost:5173', 'http://localhost:3001', 'http://localhost:3000']
 
+const allowAnyOrigin = allowedOrigins.includes('*')
+if (allowAnyOrigin && NODE_ENV === 'production') {
+  console.error('[FATAL] CORS_ORIGINS must not contain "*" in production.')
+  process.exit(1)
+}
+if (allowAnyOrigin) {
+  console.warn('WARNING: CORS_ORIGINS contains "*"; credentialed cross-origin requests are disabled.')
+}
+
 app.use(cors({
   origin: function (origin, callback) {
     if (!origin) return callback(null, true)
-    if (allowedOrigins.includes(origin) || allowedOrigins.includes('*')) {
+    if (allowAnyOrigin || allowedOrigins.includes(origin)) {
       return callback(null, true)
     }
     return callback(new Error('Not allowed by CORS'))
   },
   methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization'],
-  credentials: true,
+  // Credentials cannot be combined with a wildcard origin.
+  credentials: !allowAnyOrigin,
   maxAge: 86400
 }))
 
@@ -199,7 +209,7 @@ function authMiddleware(req, res, next) {
 // ==================== AUTH ====================
 app.post('/api/auth/admin-login', validateAdminLogin, handleValidationErrors, async (req, res, next) => {
   try {
-    const { username, password, role } = req.body
+    const { username, password } = req.body
     const clientIp = req.ip || req.connection.remoteAddress || '0.0.0.0'
 
     const admin = db.prepare('SELECT * FROM admins WHERE username = ?').get(username)
@@ -222,15 +232,14 @@ app.post('/api/auth/admin-login', validateAdminLogin, handleValidationErrors, as
 
     logLoginAttempt(username, true, clientIp)
 
-    const tokenRole = role || admin.role
     const token = jwt.sign(
-      { id: admin.id, username: admin.username, role: tokenRole, displayName: admin.display_name },
+      { id: admin.id, username: admin.username, role: admin.role, displayName: admin.display_name },
       JWT_SECRET,
       { expiresIn: '24h' }
     )
 
     res.json({
-      user: { username: admin.username, displayName: admin.display_name },
+      user: { username: admin.username, displayName: admin.display_name, role: admin.role },
       access_token: token
     })
   } catch (err) {
