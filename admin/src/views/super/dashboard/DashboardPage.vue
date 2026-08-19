@@ -133,6 +133,7 @@ import { ref, computed, onMounted } from 'vue'
 import VChart from 'vue-echarts'
 import { getDashboard, getDashboardAlerts } from '@/api/dashboard'
 import api from '@/api/index'
+import { formatNumber as formatNum, formatMoney } from '@/utils/format'
 
 const kpi = ref({})
 const kpiChanges = ref({})
@@ -245,13 +246,6 @@ onMounted(() => {
 
 
 
-function formatNum(n) { return n?.toLocaleString() || '0' }
-function formatMoney(n) {
-  const v = n || 0
-  if (v === 0) return '0'
-  if (Math.abs(v) < 10000) return v.toFixed(2)
-  return (v / 10000).toFixed(1) + '万'
-}
 function changeClass(val) { return val > 0 ? 'up' : val < 0 ? 'down' : '' }
 function changeArrow(val) { return val > 0 ? '↑' : val < 0 ? '↓' : '→' }
 

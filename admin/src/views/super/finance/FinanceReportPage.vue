@@ -119,8 +119,8 @@
 import { ref, computed, onMounted } from 'vue'
 import VChart from 'vue-echarts'
 import { getFinancialReport, getGameCategoryRevenue, exportFinancialCSV } from '@/api/finance'
-import { ElMessage } from 'element-plus'
 import { Download } from '@element-plus/icons-vue'
+import { exportCsv } from '@/utils/csv'
 
 const period = ref('daily')
 const dateRange = ref(null)
@@ -249,24 +249,12 @@ const categoryPieOption = computed(() => {
 })
 
 async function exportCSV() {
-  try {
-    const params = { period: period.value }
-    if (dateRange.value && dateRange.value.length === 2) {
-      params.startDate = dateRange.value[0]
-      params.endDate = dateRange.value[1]
-    }
-    const response = await exportFinancialCSV(params)
-    const blob = new Blob([response], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = `financial_report_${period.value}.csv`
-    link.click()
-    URL.revokeObjectURL(url)
-    ElMessage.success('导出成功')
-  } catch (e) {
-    ElMessage.error('导出失败')
+  const params = { period: period.value }
+  if (dateRange.value && dateRange.value.length === 2) {
+    params.startDate = dateRange.value[0]
+    params.endDate = dateRange.value[1]
   }
+  await exportCsv(() => exportFinancialCSV(params), `financial_report_${period.value}.csv`)
 }
 </script>
 

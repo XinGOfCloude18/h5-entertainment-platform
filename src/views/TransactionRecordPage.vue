@@ -7,7 +7,7 @@
           <div class="record-list">
             <div v-for="r in accountRecords" :key="r.id" class="record-item">
               <div class="r-left"><span class="r-type">{{ r.type }}</span><span class="r-time">{{ r.time }}</span></div>
-              <div class="r-right"><span class="r-amount" :class="r.amount>0?'green':'red'">{{ r.amount>0?'+':'' }}{{ r.amount.toFixed(2) }}</span><span class="r-balance">Balance: {{ r.balance.toFixed(2) }}</span></div>
+              <div class="r-right"><span class="r-amount" :class="r.amount>0?'green':'red'">{{ formatSigned(r.amount) }}</span><span class="r-balance">Balance: {{ r.balance.toFixed(2) }}</span></div>
             </div>
           </div>
         </van-tab>
@@ -42,6 +42,7 @@
 
 <script setup>
 import { ref } from 'vue'
+import { formatSigned } from '@/utils/format'
 const activeTab = ref(0)
 const accountRecords = [
   { id: 1, type: 'Deposit', time: '2024-03-15 14:30', amount: 1000, balance: 2500 },

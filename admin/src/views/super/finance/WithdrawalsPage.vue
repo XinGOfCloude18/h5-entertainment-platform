@@ -184,6 +184,7 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { getWithdrawals, updateWithdrawal, batchWithdrawals, exportWithdrawalsCSV, getAutoReviewRules, createAutoReviewRule, updateAutoReviewRule, deleteAutoReviewRule } from '@/api/finance'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Check, Close, Download } from '@element-plus/icons-vue'
+import { exportCsv } from '@/utils/csv'
 
 const search = ref('')
 const statusFilter = ref('')
@@ -281,19 +282,7 @@ async function batchAction(action) {
 }
 
 async function exportCSV() {
-  try {
-    const response = await exportWithdrawalsCSV()
-    const blob = new Blob([response], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = 'withdrawals_export.csv'
-    link.click()
-    URL.revokeObjectURL(url)
-    ElMessage.success('导出成功')
-  } catch (e) {
-    ElMessage.error('导出失败')
-  }
+  await exportCsv(() => exportWithdrawalsCSV(), 'withdrawals_export.csv')
 }
 
 async function toggleRule(rule) {

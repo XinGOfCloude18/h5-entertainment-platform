@@ -72,6 +72,7 @@
 
 <script setup>
 import { showToast } from 'vant'
+import { copyToClipboard } from '@/utils/clipboard'
 const steps = [
   { title: 'Apply', desc: 'Register an account and contact our agent support' },
   { title: 'Get Your Link', desc: 'Receive your unique referral link and promotional materials' },
@@ -79,7 +80,7 @@ const steps = [
   { title: 'Earn', desc: 'Earn 0.6% on every bet your referrals place, settled daily' }
 ]
 function share(method) {
-  if (method === 'copy') { navigator.clipboard?.writeText('https://h5play.com/invite?code=AGENT001'); showToast({ message: 'Link copied!', type: 'success' }) }
+  if (method === 'copy') { copyToClipboard('https://h5play.com/invite?code=AGENT001', { message: 'Link copied!', type: 'success' }) }
   else showToast({ message: `Opening ${method}...` })
 }
 </script>

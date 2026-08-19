@@ -10,7 +10,7 @@
       <div class="stats-bar">
         <div class="stat"><span class="stat-label">Total Bets</span><span class="stat-val">{{ betRecords.length }}</span></div>
         <div class="stat"><span class="stat-label">Bet Amount</span><span class="stat-val">{{ totalBetAmount.toFixed(2) }}</span></div>
-        <div class="stat"><span class="stat-label">Win/Loss</span><span class="stat-val" :class="totalWinLoss>=0?'green':'red'">{{ totalWinLoss>=0?'+':'' }}{{ totalWinLoss.toFixed(2) }}</span></div>
+        <div class="stat"><span class="stat-label">Win/Loss</span><span class="stat-val" :class="totalWinLoss>=0?'green':'red'">{{ formatSigned(totalWinLoss) }}</span></div>
       </div>
       <div class="record-list">
         <div v-for="r in filteredRecords" :key="r.id" class="record-item">
@@ -20,7 +20,7 @@
           </div>
           <div class="r-bottom">
             <div class="r-detail"><span class="r-label">Bet</span><span>{{ r.betAmount.toFixed(2) }}</span></div>
-            <div class="r-detail"><span class="r-label">Win</span><span :class="r.winAmount>=0?'green':'red'">{{ r.winAmount>=0?'+':'' }}{{ r.winAmount.toFixed(2) }}</span></div>
+            <div class="r-detail"><span class="r-label">Win</span><span :class="r.winAmount>=0?'green':'red'">{{ formatSigned(r.winAmount) }}</span></div>
             <div class="r-detail"><span class="r-label">Provider</span><span>{{ r.provider }}</span></div>
           </div>
         </div>
@@ -31,6 +31,7 @@
 
 <script setup>
 import { ref, computed } from 'vue'
+import { formatSigned } from '@/utils/format'
 const gameType = ref(0)
 const gameTypes = [
   { text: 'All Games', value: 0 }, { text: 'Slots', value: 1 }, { text: 'Live Casino', value: 2 },

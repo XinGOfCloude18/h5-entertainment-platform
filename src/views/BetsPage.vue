@@ -24,7 +24,7 @@
         <div class="stat">
           <span class="stat-label">{{ $t('bets.profitLoss') }}</span>
           <span class="stat-val" :class="totalPL >= 0 ? 'green' : 'red'">
-            {{ totalPL >= 0 ? '+' : '' }}{{ totalPL.toFixed(2) }}
+            {{ formatSigned(totalPL) }}
           </span>
         </div>
       </div>
@@ -47,7 +47,7 @@
             <div class="r-detail">
               <span class="r-label">{{ $t('bets.winAmount') }}</span>
               <span :class="r.winAmount >= 0 ? 'green' : 'red'">
-                {{ r.winAmount >= 0 ? '+' : '' }}{{ r.winAmount.toFixed(2) }}
+                {{ formatSigned(r.winAmount) }}
               </span>
             </div>
             <div class="r-detail">
@@ -77,6 +77,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { formatSigned } from '@/utils/format'
 
 const { t } = useI18n()
 

@@ -15,6 +15,8 @@ import sk7755CallbackRouter from './services/sk7755/callbackRouter.js'
 import { init as initCallback, ensureTable as ensureCallbackTable } from './services/sk7755/callbackHandler.js'
 import { init as initGameSync, startAutoSync, syncAll, getPlatforms, togglePlatform, toggleGame, getGamesByPlatform, getCachedGames } from './services/sk7755/gameSync.js'
 import { registerProviders } from './providers/registry.js'
+import { clientIp, parsePagination, sendCsv } from './utils/http.js'
+import { mapMember, mapAgent } from './utils/mappers.js'
 import { validateAdminLogin, validateCreateMember, validateCreateAgent, validateUpdateAgent, validateCreateGame, validateUpdateGame, validateCreateAdmin, validateCreateProvider, validateCreateActivity, validateUpdateActivity, validateCreateMessage, validateCreateAnnouncement, validateUpdateAnnouncement, validateCreateRiskRule, validateAddBlacklistIP, validateManualDeposit, validateBatchWithdrawal, validateAutoReviewRule, validateHotScore, validateRecommend, validateVipAdjust, validateTagsUpdate, validateBalanceAdjust, handleValidationErrors } from './validation.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
@@ -200,27 +202,27 @@ function authMiddleware(req, res, next) {
 app.post('/api/auth/admin-login', validateAdminLogin, handleValidationErrors, async (req, res, next) => {
   try {
     const { username, password, role } = req.body
-    const clientIp = req.ip || req.connection.remoteAddress || '0.0.0.0'
+    const ip = clientIp(req)
 
     const admin = db.prepare('SELECT * FROM admins WHERE username = ?').get(username)
     if (!admin) {
-      logLoginAttempt(username, false, clientIp)
+      logLoginAttempt(username, false, ip)
       return res.status(401).json({ error: 'Invalid credentials' })
     }
 
     const pwdMatch = await bcrypt.compare(password, admin.password)
     if (!pwdMatch) {
-      logLoginAttempt(username, false, clientIp)
+      logLoginAttempt(username, false, ip)
       return res.status(401).json({ error: 'Invalid credentials' })
     }
     if (admin.status !== 'active') {
-      logLoginAttempt(username, false, clientIp)
+      logLoginAttempt(username, false, ip)
       return res.status(403).json({ error: 'Account disabled' })
     }
 
     db.prepare(`UPDATE admins SET last_login = datetime('now') WHERE id = ?`).run(admin.id)
 
-    logLoginAttempt(username, true, clientIp)
+    logLoginAttempt(username, true, ip)
 
     const tokenRole = role || admin.role
     const token = jwt.sign(
@@ -393,40 +395,20 @@ app.get('/api/admin/members', authMiddleware, (req, res) => {
   }
 
   if (page && pageSize) {
-    const p = Number(page)
-    const ps = Number(pageSize)
+    const { page: p, pageSize: ps, offset } = parsePagination(req.query)
     const total = db.prepare('SELECT COUNT(*) as c FROM members').get().c
-    const offset = (p - 1) * ps
     const rows = db.prepare(`SELECT * FROM members ${orderClause} LIMIT ? OFFSET ?`).all(ps, offset)
-    const members = rows.map(r => ({
-      ...r,
-      tags: JSON.parse(r.tags || '[]'),
-      totalDeposit: r.total_deposit,
-      totalWithdraw: r.total_withdraw,
-      lastLogin: r.last_login
-    }))
-    return res.json({ data: members, total, page: p, pageSize: ps })
+    return res.json({ data: rows.map(mapMember), total, page: p, pageSize: ps })
   }
 
   const rows = db.prepare(`SELECT * FROM members ${orderClause}`).all()
-  const members = rows.map(r => ({
-    ...r,
-    tags: JSON.parse(r.tags || '[]'),
-    totalDeposit: r.total_deposit,
-    totalWithdraw: r.total_withdraw,
-    lastLogin: r.last_login
-  }))
-  res.json(members)
+  res.json(rows.map(mapMember))
 })
 
 app.get('/api/admin/members/:id', authMiddleware, (req, res) => {
   const row = db.prepare('SELECT * FROM members WHERE id = ?').get(req.params.id)
   if (!row) return res.status(404).json({ error: 'Member not found' })
-  row.tags = JSON.parse(row.tags || '[]')
-  row.totalDeposit = row.total_deposit
-  row.totalWithdraw = row.total_withdraw
-  row.lastLogin = row.last_login
-  res.json(row)
+  res.json(mapMember(row))
 })
 
 app.put('/api/admin/members/:id/action', authMiddleware, (req, res) => {
@@ -437,7 +419,7 @@ app.put('/api/admin/members/:id/action', authMiddleware, (req, res) => {
   const newStatus = action === 'freeze' ? 'frozen' : 'active'
   db.prepare('UPDATE members SET status = ? WHERE id = ?').run(newStatus, req.params.id)
 
-  auditLog(req.user.username, action === 'freeze' ? '冻结账户' : '解冻账户', req.params.id, action + ' member', req.ip || '0.0.0.0')
+  auditLog(req.user.username, action === 'freeze' ? '冻结账户' : '解冻账户', req.params.id, action + ' member', clientIp(req))
 
   res.json({ success: true, status: newStatus })
 })
@@ -449,7 +431,7 @@ app.post('/api/admin/members', authMiddleware, validateCreateMember, handleValid
     db.prepare('INSERT INTO members (id, username, agent, vip, balance, status, tags) VALUES (?,?,?,?,?,?,?)').run(
       id, username, agent || '', vip || 0, balance || 0, status || 'active', '[]'
     )
-    auditLog(req.user.username, '创建会员', id, '创建会员 ' + username, req.ip || '0.0.0.0')
+    auditLog(req.user.username, '创建会员', id, '创建会员 ' + username, clientIp(req))
     res.json({ success: true, id })
   } catch (err) {
     next(err)
@@ -458,13 +440,10 @@ app.post('/api/admin/members', authMiddleware, validateCreateMember, handleValid
 
 // Member detail with aggregated data
 app.get('/api/admin/members/:id/detail', authMiddleware, (req, res) => {
-  const member = db.prepare('SELECT * FROM members WHERE id = ?').get(req.params.id)
-  if (!member) return res.status(404).json({ error: 'Member not found' })
+  const memberRow = db.prepare('SELECT * FROM members WHERE id = ?').get(req.params.id)
+  if (!memberRow) return res.status(404).json({ error: 'Member not found' })
 
-  member.tags = JSON.parse(member.tags || '[]')
-  member.totalDeposit = member.total_deposit
-  member.totalWithdraw = member.total_withdraw
-  member.lastLogin = member.last_login
+  const member = mapMember(memberRow)
 
   // Aggregate bet stats from sk7755_bets (real data)
   const sk7755Uid = 'ddyl_' + req.params.id
@@ -576,7 +555,7 @@ app.put('/api/admin/members/:id/vip', authMiddleware, validateVipAdjust, handleV
   const oldLevel = member.vip
   db.prepare('UPDATE members SET vip = ? WHERE id = ?').run(level, req.params.id)
 
-  auditLog(req.user.username, 'VIP调整', req.params.id, `VIP ${oldLevel} → ${level}, 原因: ${reason || '手动调整'}`, req.ip || '0.0.0.0')
+  auditLog(req.user.username, 'VIP调整', req.params.id, `VIP ${oldLevel} → ${level}, 原因: ${reason || '手动调整'}`, clientIp(req))
 
   res.json({ success: true, oldLevel, newLevel: level })
 })
@@ -590,7 +569,7 @@ app.put('/api/admin/members/:id/tags', authMiddleware, validateTagsUpdate, handl
   const tagsJson = JSON.stringify(tags || [])
   db.prepare('UPDATE members SET tags = ? WHERE id = ?').run(tagsJson, req.params.id)
 
-  auditLog(req.user.username, '更新标签', req.params.id, '标签: ' + (tags || []).join(', '), req.ip || '0.0.0.0')
+  auditLog(req.user.username, '更新标签', req.params.id, '标签: ' + (tags || []).join(', '), clientIp(req))
 
   res.json({ success: true, tags })
 })
@@ -603,7 +582,7 @@ app.post('/api/admin/members/:id/force-logout', authMiddleware, (req, res) => {
   // Invalidate by updating last_login to trigger token mismatch on next request
   db.prepare("UPDATE members SET last_login = datetime('now') WHERE id = ?").run(req.params.id)
 
-  auditLog(req.user.username, '强制下线', req.params.id, '强制下线会员 ' + member.username, req.ip || '0.0.0.0')
+  auditLog(req.user.username, '强制下线', req.params.id, '强制下线会员 ' + member.username, clientIp(req))
 
   res.json({ success: true, message: '已强制下线' })
 })
@@ -635,7 +614,7 @@ app.post('/api/admin/members/:id/balance-adjust', authMiddleware, validateBalanc
 
   auditLog(req.user.username, '余额调整', req.params.id,
     `${type === 'deduction' ? '扣减' : '充值'} ¥${Math.abs(amount)}, 原因: ${reason || '手动调整'}, 余额: ¥${member.balance} → ¥${newBalance}`,
-    req.ip || '0.0.0.0')
+    clientIp(req))
 
   cacheInvalidate('dashboard')
 
@@ -645,33 +624,17 @@ app.post('/api/admin/members/:id/balance-adjust', authMiddleware, validateBalanc
 // ==================== AGENTS ====================
 app.get('/api/admin/agents', authMiddleware, (req, res) => {
   const rows = db.prepare('SELECT * FROM agents ORDER BY id').all()
-  const agents = rows.map(r => ({
-    ...r,
-    created: r.created_at,
-    monthRevenue: r.month_revenue,
-    shareMode: r.share_mode,
-    shareRate: r.share_rate
-  }))
-  res.json(agents)
+  res.json(rows.map(mapAgent))
 })
 
 app.get('/api/admin/agents/:id', authMiddleware, (req, res) => {
   const row = db.prepare('SELECT * FROM agents WHERE id = ?').get(req.params.id)
   if (!row) return res.status(404).json({ error: 'Agent not found' })
-  row.created = row.created_at
-  row.monthRevenue = row.month_revenue
-  row.shareMode = row.share_mode
-  row.shareRate = row.share_rate
+  const agent = mapAgent(row)
   // Get agent members
   const members = db.prepare('SELECT * FROM members WHERE agent = ?').all(row.brand)
-  row.membersList = members.map(m => ({
-    ...m,
-    tags: JSON.parse(m.tags || '[]'),
-    totalDeposit: m.total_deposit,
-    totalWithdraw: m.total_withdraw,
-    lastLogin: m.last_login
-  }))
-  res.json(row)
+  agent.membersList = members.map(mapMember)
+  res.json(agent)
 })
 
 app.post('/api/admin/agents', authMiddleware, validateCreateAgent, handleValidationErrors, (req, res, next) => {
@@ -682,7 +645,7 @@ app.post('/api/admin/agents', authMiddleware, validateCreateAgent, handleValidat
     id, brand, domain || '', contact || '', balance || 0, shareMode || 'revenue', shareRate || 40
   )
 
-  auditLog(req.user.username, '创建代理', id, '创建代理 ' + brand, req.ip || '0.0.0.0')
+  auditLog(req.user.username, '创建代理', id, '创建代理 ' + brand, clientIp(req))
 
   res.json({ success: true, id })
 })
@@ -773,7 +736,7 @@ app.put('/api/admin/deposits/:id', authMiddleware, (req, res) => {
   }
 
   auditLog(req.user.username, action === 'approve' ? '充值确认' : '充值拒绝', req.params.id,
-    (action === 'approve' ? '确认到账' : '拒绝') + ' ¥' + order.amount, req.ip || '0.0.0.0')
+    (action === 'approve' ? '确认到账' : '拒绝') + ' ¥' + order.amount, clientIp(req))
 
   cacheInvalidate('dashboard')
   res.json({ success: true, status: newStatus })
@@ -801,7 +764,7 @@ app.put('/api/admin/withdrawals/:id', authMiddleware, (req, res) => {
 
   db.prepare('UPDATE withdrawals SET status = ? WHERE id = ?').run(newStatus, req.params.id)
 
-  auditLog(req.user.username, '审批提现', req.params.id, action + ' ¥' + order.amount, req.ip || '0.0.0.0')
+  auditLog(req.user.username, '审批提现', req.params.id, action + ' ¥' + order.amount, clientIp(req))
 
   res.json({ success: true, status: newStatus })
 })
@@ -822,7 +785,7 @@ app.post('/api/finance/deposits/manual', authMiddleware, validateManualDeposit, 
     // Update member total_deposit
     db.prepare('UPDATE members SET total_deposit = total_deposit + ?, balance = balance + ? WHERE id = ?').run(amount, amount, member_id)
 
-    auditLog(req.user.username, '手动补单', id, '手动补单 ¥' + amount + ' 给 ' + member_id + ' 原因: ' + reason, req.ip || '0.0.0.0')
+    auditLog(req.user.username, '手动补单', id, '手动补单 ¥' + amount + ' 给 ' + member_id + ' 原因: ' + reason, clientIp(req))
     cacheInvalidate('dashboard')
     res.json({ success: true, id })
   } catch (err) {
@@ -833,27 +796,17 @@ app.post('/api/finance/deposits/manual', authMiddleware, validateManualDeposit, 
 // GET /api/finance/deposits/export - Export deposits as CSV
 app.get('/api/finance/deposits/export', authMiddleware, (req, res) => {
   const rows = db.prepare('SELECT * FROM deposits ORDER BY time DESC').all()
-  const headers = ['订单号', '会员', '代理', '金额', '渠道', '状态', 'TxHash', '时间']
-  const csvLines = [headers.join(',')]
-  for (const r of rows) {
-    csvLines.push([r.id, r.member, r.agent || '', r.amount, r.channel || '', r.status, r.tx_hash || '', r.time].map(v => '"' + String(v).replace(/"/g, '""') + '"').join(','))
-  }
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8')
-  res.setHeader('Content-Disposition', 'attachment; filename=deposits_export.csv')
-  res.send('\uFEFF' + csvLines.join('\n'))
+  sendCsv(res, 'deposits_export.csv',
+    ['订单号', '会员', '代理', '金额', '渠道', '状态', 'TxHash', '时间'],
+    rows.map(r => [r.id, r.member, r.agent, r.amount, r.channel, r.status, r.tx_hash, r.time]))
 })
 
 // GET /api/finance/withdrawals/export - Export withdrawals as CSV
 app.get('/api/finance/withdrawals/export', authMiddleware, (req, res) => {
   const rows = db.prepare('SELECT * FROM withdrawals ORDER BY time DESC').all()
-  const headers = ['订单号', '会员', '代理', '金额', '渠道', '状态', '提现地址', '风险等级', '时间']
-  const csvLines = [headers.join(',')]
-  for (const r of rows) {
-    csvLines.push([r.id, r.member, r.agent || '', r.amount, r.channel || '', r.status, r.address || '', r.risk_level || '', r.time].map(v => '"' + String(v).replace(/"/g, '""') + '"').join(','))
-  }
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8')
-  res.setHeader('Content-Disposition', 'attachment; filename=withdrawals_export.csv')
-  res.send('\uFEFF' + csvLines.join('\n'))
+  sendCsv(res, 'withdrawals_export.csv',
+    ['订单号', '会员', '代理', '金额', '渠道', '状态', '提现地址', '风险等级', '时间'],
+    rows.map(r => [r.id, r.member, r.agent, r.amount, r.channel, r.status, r.address, r.risk_level, r.time]))
 })
 
 // POST /api/finance/withdrawals/batch - Batch approve/reject withdrawals
@@ -867,7 +820,7 @@ app.post('/api/finance/withdrawals/batch', authMiddleware, validateBatchWithdraw
       const result = stmt.run(newStatus, id)
       if (result.changes > 0) updated++
     }
-    auditLog(req.user.username, '批量' + (action === 'approve' ? '通过' : '拒绝') + '提现', ids.join(','), '批量操作 ' + updated + ' 笔, 原因: ' + (reason || ''), req.ip || '0.0.0.0')
+    auditLog(req.user.username, '批量' + (action === 'approve' ? '通过' : '拒绝') + '提现', ids.join(','), '批量操作 ' + updated + ' 笔, 原因: ' + (reason || ''), clientIp(req))
     res.json({ success: true, updated })
   } catch (err) {
     next(err)
@@ -887,7 +840,7 @@ app.post('/api/finance/auto-review-rules', authMiddleware, validateAutoReviewRul
     db.prepare('INSERT INTO auto_review_rules (name, condition_field, operator, threshold, action, enabled) VALUES (?,?,?,?,?,?)').run(
       name, condition_field, operator, threshold, action, enabled !== false ? 1 : 0
     )
-    auditLog(req.user.username, '创建自动审核规则', name, '创建规则: ' + name, req.ip || '0.0.0.0')
+    auditLog(req.user.username, '创建自动审核规则', name, '创建规则: ' + name, clientIp(req))
     res.json({ success: true })
   } catch (err) {
     next(err)
@@ -1010,7 +963,7 @@ app.post('/api/finance/deposit-channels', authMiddleware, (req, res) => {
     const result = db.prepare('INSERT INTO deposit_channels (name, network, address, enabled) VALUES (?,?,?,?)').run(
       name, network || 'TRC20', address, enabled !== false ? 1 : 0
     )
-    auditLog(req.user.username, '添加充值通道', name, '添加通道: ' + name + ' (' + network + ')', req.ip || '0.0.0.0')
+    auditLog(req.user.username, '添加充值通道', name, '添加通道: ' + name + ' (' + network + ')', clientIp(req))
     res.json({ success: true, id: result.lastInsertRowid })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -1057,7 +1010,7 @@ app.delete('/api/finance/deposit-channels/:id', authMiddleware, (req, res) => {
       today_amount REAL DEFAULT 0
     )`)
     db.prepare('DELETE FROM deposit_channels WHERE id = ?').run(req.params.id)
-    auditLog(req.user.username, '删除充值通道', req.params.id, '删除充值通道 #' + req.params.id, req.ip || '0.0.0.0')
+    auditLog(req.user.username, '删除充值通道', req.params.id, '删除充值通道 #' + req.params.id, clientIp(req))
     res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -1097,15 +1050,12 @@ app.get('/api/finance/game-category-revenue', authMiddleware, (req, res) => {
 
 app.get('/api/finance/financial-report/export', authMiddleware, (req, res) => {
   const rows = db.prepare('SELECT * FROM financial_summary ORDER BY date DESC').all()
-  const headers = ['日期', '充值', '提现', '奖金', 'GGR', 'NGR', '利润率']
-  const csvLines = [headers.join(',')]
-  for (const r of rows) {
-    const margin = r.deposit > 0 ? ((r.ngr / r.deposit) * 100).toFixed(1) + '%' : '0.0%'
-    csvLines.push([r.date, r.deposit, r.withdrawal, r.bonus, r.ggr, r.ngr, margin].map(v => '"' + String(v).replace(/"/g, '""') + '"').join(','))
-  }
-  res.setHeader('Content-Type', 'text/csv; charset=utf-8')
-  res.setHeader('Content-Disposition', 'attachment; filename=financial_report.csv')
-  res.send('\uFEFF' + csvLines.join('\n'))
+  sendCsv(res, 'financial_report.csv',
+    ['日期', '充值', '提现', '奖金', 'GGR', 'NGR', '利润率'],
+    rows.map(r => {
+      const margin = r.deposit > 0 ? ((r.ngr / r.deposit) * 100).toFixed(1) + '%' : '0.0%'
+      return [r.date, r.deposit, r.withdrawal, r.bonus, r.ggr, r.ngr, margin]
+    }))
 })
 
 // ==================== PHASE 18A: BALANCE ADJUSTMENT ====================
@@ -1166,7 +1116,7 @@ app.post('/api/admin/games', authMiddleware, validateCreateGame, handleValidatio
   db.prepare('INSERT INTO games (id, name, provider, category, status, rtp, is_hot, is_new) VALUES (?,?,?,?,?,?,?,?)').run(
     id, name, provider || '', category || '', status || 'active', rtp || 96.0, isHot ? 1 : 0, isNew ? 1 : 0
   )
-  auditLog(req.user.username, '创建游戏', id, '创建游戏 ' + name, req.ip || '0.0.0.0')
+  auditLog(req.user.username, '创建游戏', id, '创建游戏 ' + name, clientIp(req))
   cacheInvalidate('admin:games')
   cacheInvalidate('h5:games')
   res.json({ success: true, id })
@@ -1226,7 +1176,7 @@ app.post('/api/admin/providers', authMiddleware, validateCreateProvider, handleV
     db.prepare('INSERT INTO providers (id, name, category, games, status) VALUES (?,?,?,?,?)').run(
       id, name, category || '', games || 0, status || 'active'
     )
-    auditLog(req.user.username, '创建供应商', id, '创建供应商 ' + name, req.ip || '0.0.0.0')
+    auditLog(req.user.username, '创建供应商', id, '创建供应商 ' + name, clientIp(req))
     res.json({ success: true })
   } catch (err) {
     next(err)
@@ -1259,7 +1209,8 @@ app.get('/api/admin/bets', authMiddleware, (req, res) => {
 
 // GET /api/games/bets - Bet records with pagination and filters (reads from sk7755_bets)
 app.get('/api/games/bets', authMiddleware, (req, res) => {
-  const { page = 1, pageSize = 20, search, provider, category, startDate, endDate } = req.query
+  const { search, provider, category, startDate, endDate } = req.query
+  const { page, pageSize, offset } = parsePagination(req.query)
   let where = []
   let params = []
 
@@ -1288,9 +1239,8 @@ app.get('/api/games/bets', authMiddleware, (req, res) => {
   const countQuery = `SELECT COUNT(*) as total FROM sk7755_bets b LEFT JOIN games g ON b.game_name = g.name ${whereClause}`
   const total = db.prepare(countQuery).get(...params).total
 
-  const offset = (Number(page) - 1) * Number(pageSize)
   const dataQuery = `SELECT b.* FROM sk7755_bets b LEFT JOIN games g ON b.game_name = g.name ${whereClause} ORDER BY b.created_at DESC LIMIT ? OFFSET ?`
-  const rows = db.prepare(dataQuery).all(...params, Number(pageSize), offset)
+  const rows = db.prepare(dataQuery).all(...params, pageSize, offset)
 
   res.json({
     data: rows.map(r => ({
@@ -1307,8 +1257,8 @@ app.get('/api/games/bets', authMiddleware, (req, res) => {
       order_no: r.order_no
     })),
     total,
-    page: Number(page),
-    pageSize: Number(pageSize)
+    page,
+    pageSize
   })
 })
 
@@ -1355,7 +1305,7 @@ app.put('/api/admin/sk7755/platforms/:code/toggle', authMiddleware, (req, res) =
   try {
     const { enabled } = req.body
     togglePlatform(req.params.code, enabled)
-    auditLog(req.user.username, 'SK7755平台' + (enabled ? '启用' : '禁用'), req.params.code, '', req.ip || '0.0.0.0')
+    auditLog(req.user.username, 'SK7755平台' + (enabled ? '启用' : '禁用'), req.params.code, '', clientIp(req))
     res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -1377,7 +1327,7 @@ app.put('/api/admin/sk7755/games/toggle', authMiddleware, (req, res) => {
   try {
     const { platform, game_code, status } = req.body
     toggleGame(platform, game_code, status)
-    auditLog(req.user.username, 'SK7755游戏' + status, `${platform}/${game_code}`, '', req.ip || '0.0.0.0')
+    auditLog(req.user.username, 'SK7755游戏' + status, `${platform}/${game_code}`, '', clientIp(req))
     res.json({ success: true })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -1388,7 +1338,7 @@ app.put('/api/admin/sk7755/games/toggle', authMiddleware, (req, res) => {
 app.post('/api/admin/sk7755/sync', authMiddleware, async (req, res) => {
   try {
     const count = await syncAll()
-    auditLog(req.user.username, 'SK7755手动同步', '', `同步了 ${count} 款游戏`, req.ip || '0.0.0.0')
+    auditLog(req.user.username, 'SK7755手动同步', '', `同步了 ${count} 款游戏`, clientIp(req))
     res.json({ success: true, gameCount: count })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -1398,7 +1348,8 @@ app.post('/api/admin/sk7755/sync', authMiddleware, async (req, res) => {
 // GET /api/admin/sk7755/bets — SK7755 bet records with pagination
 app.get('/api/admin/sk7755/bets', authMiddleware, (req, res) => {
   try {
-    const { page = 1, pageSize = 20, search, platform, startDate, endDate } = req.query
+    const { search, platform, startDate, endDate } = req.query
+    const { page, pageSize, offset } = parsePagination(req.query)
     let where = []
     let params = []
 
@@ -1421,9 +1372,8 @@ app.get('/api/admin/sk7755/bets', authMiddleware, (req, res) => {
 
     const whereClause = where.length ? 'WHERE ' + where.join(' AND ') : ''
     const total = db.prepare(`SELECT COUNT(*) as c FROM sk7755_bets ${whereClause}`).get(...params).c
-    const offset = (Number(page) - 1) * Number(pageSize)
     const rows = db.prepare(`SELECT * FROM sk7755_bets ${whereClause} ORDER BY created_at DESC LIMIT ? OFFSET ?`)
-      .all(...params, Number(pageSize), offset)
+      .all(...params, pageSize, offset)
 
     res.json({
       data: rows.map(r => ({
@@ -1442,8 +1392,8 @@ app.get('/api/admin/sk7755/bets', authMiddleware, (req, res) => {
         createdAt: r.created_at,
       })),
       total,
-      page: Number(page),
-      pageSize: Number(pageSize),
+      page,
+      pageSize,
     })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -1473,7 +1423,7 @@ app.post('/api/admin/categories', authMiddleware, (req, res) => {
   if (!code || !name_zh || !name_en) return res.status(400).json({ error: 'code, name_zh, name_en required' })
   try {
     const result = db.prepare('INSERT INTO game_categories (code, name_zh, name_en, icon, sort_order) VALUES (?,?,?,?,?)').run(code, name_zh, name_en, icon || '', sort_order || 0)
-    auditLog(req.user.username, '创建分类', code, name_zh, req.ip || '0.0.0.0')
+    auditLog(req.user.username, '创建分类', code, name_zh, clientIp(req))
     res.json({ success: true, id: result.lastInsertRowid })
   } catch (err) {
     res.status(500).json({ error: err.message })
@@ -1657,7 +1607,7 @@ app.put('/api/admin/vip-levels/:id', authMiddleware, (req, res) => {
     status, quarterlyReview, req.params.id
   )
   cacheInvalidate('admin:vip-levels')
-  auditLog(req.user.username, 'VIP等级更新', 'vip_level_' + req.params.id, 'Updated VIP level config', req.ip || '0.0.0.0')
+  auditLog(req.user.username, 'VIP等级更新', 'vip_level_' + req.params.id, 'Updated VIP level config', clientIp(req))
   res.json({ success: true })
 })
 
@@ -1685,7 +1635,7 @@ app.put('/api/admin/rakeback/config/:id', authMiddleware, (req, res) => {
     house_edge_max = COALESCE(?, house_edge_max),
     default_edge = COALESCE(?, default_edge)
     WHERE id = ?`).run(rate, minBet, status, houseEdgeMin, houseEdgeMax, defaultEdge, req.params.id)
-  auditLog(req.user.username, '返水配置更新', 'rakeback_config_' + req.params.id, 'Updated rakeback config', req.ip || '0.0.0.0')
+  auditLog(req.user.username, '返水配置更新', 'rakeback_config_' + req.params.id, 'Updated rakeback config', clientIp(req))
   res.json({ success: true })
 })
 
@@ -1726,7 +1676,7 @@ app.post('/api/admin/activities', authMiddleware, validateCreateActivity, handle
     db.prepare('INSERT INTO promotions (id, name, type, status, start_time, end_time, min_deposit, bonus_rate, wagering, max_bonus) VALUES (?,?,?,?,?,?,?,?,?,?)').run(
       id, name, type || '', status || 'active', startTime || '', endTime || '', minDeposit || 0, bonusRate || 0, wagering || 0, maxBonus || 0
     )
-    auditLog(req.user.username, '创建活动', id, '创建活动 ' + name, req.ip || '0.0.0.0')
+    auditLog(req.user.username, '创建活动', id, '创建活动 ' + name, clientIp(req))
     res.json({ success: true, id })
   } catch (err) {
     next(err)
@@ -1774,7 +1724,7 @@ app.post('/api/admin/messages', authMiddleware, validateCreateMessage, handleVal
     db.prepare('INSERT INTO messages (title, target, target_type, type, status, content) VALUES (?,?,?,?,?,?)').run(
       title, target || '全部用户', targetType || 'all', type || 'mail', 'sent', content || ''
     )
-    auditLog(req.user.username, '发送消息', title, '发送消息: ' + title, req.ip || '0.0.0.0')
+    auditLog(req.user.username, '发送消息', title, '发送消息: ' + title, clientIp(req))
     res.json({ success: true })
   } catch (err) {
     next(err)
@@ -1832,7 +1782,7 @@ app.post('/api/admin/risk/rules', authMiddleware, validateCreateRiskRule, handle
     db.prepare('INSERT INTO risk_rules (name, description, threshold, status) VALUES (?,?,?,?)').run(
       name, description || '', threshold || 0, status || 'active'
     )
-    auditLog(req.user.username, '创建风控规则', name, '创建风控规则: ' + name, req.ip || '0.0.0.0')
+    auditLog(req.user.username, '创建风控规则', name, '创建风控规则: ' + name, clientIp(req))
     res.json({ success: true })
   } catch (err) {
     next(err)
@@ -1856,7 +1806,7 @@ app.post('/api/admin/risk/blacklist', authMiddleware, validateAddBlacklistIP, ha
     db.prepare('INSERT INTO ip_blacklist (ip, reason, added_by) VALUES (?,?,?)').run(
       ip, reason || '', req.user.username
     )
-    auditLog(req.user.username, '添加IP黑名单', ip, reason || '', req.ip || '0.0.0.0')
+    auditLog(req.user.username, '添加IP黑名单', ip, reason || '', clientIp(req))
     res.json({ success: true })
   } catch (err) {
     next(err)
@@ -1888,7 +1838,7 @@ app.post('/api/admin/admins', authMiddleware, validateCreateAdmin, handleValidat
     db.prepare('INSERT INTO admins (username, password, role, display_name) VALUES (?,?,?,?)').run(
       username, hashedPassword, role || 'admin', displayName || username
     )
-    auditLog(req.user.username, '创建管理员', username, '创建管理员 ' + username, req.ip || '0.0.0.0')
+    auditLog(req.user.username, '创建管理员', username, '创建管理员 ' + username, clientIp(req))
     res.json({ success: true })
   } catch (err) {
     if (err.message && err.message.includes('UNIQUE')) {
@@ -1951,7 +1901,7 @@ app.post('/api/admin/announcements', authMiddleware, validateCreateAnnouncement,
     ).run(
       title, content || '', target || '全部用户', targetType || 'all', targetVipLevel || null, type || '普通', finalStatus, scheduledAt || null, publishedAt
     )
-    auditLog(req.user.username, '创建公告', title, '创建公告: ' + title, req.ip || '0.0.0.0')
+    auditLog(req.user.username, '创建公告', title, '创建公告: ' + title, clientIp(req))
     res.json({ success: true, id: result.lastInsertRowid })
   } catch (err) {
     next(err)
@@ -2099,7 +2049,7 @@ app.put('/api/admin/compliance/kyc/:id', authMiddleware, (req, res) => {
     newStatus, action === 'reject' ? (rejectReason || '') : '', req.user.username, req.params.id
   )
 
-  auditLog(req.user.username, action === 'approve' ? 'KYC审批通过' : 'KYC审批拒绝', kyc.user_id, 'KYC ' + action + ' for ' + kyc.user_id, req.ip || '0.0.0.0')
+  auditLog(req.user.username, action === 'approve' ? 'KYC审批通过' : 'KYC审批拒绝', kyc.user_id, 'KYC ' + action + ' for ' + kyc.user_id, clientIp(req))
 
   res.json({ success: true, status: newStatus })
 })
@@ -2141,7 +2091,7 @@ app.put('/api/admin/compliance/aml/alerts/:id', authMiddleware, (req, res) => {
     newStatus, req.user.username, req.params.id
   )
 
-  auditLog(req.user.username, 'AML处理', String(alert.id), 'AML alert ' + action + ': ' + alert.alert_type + ' for ' + alert.user_id, req.ip || '0.0.0.0')
+  auditLog(req.user.username, 'AML处理', String(alert.id), 'AML alert ' + action + ': ' + alert.alert_type + ' for ' + alert.user_id, clientIp(req))
 
   res.json({ success: true, status: newStatus })
 })
@@ -2173,7 +2123,7 @@ app.put('/api/admin/compliance/exclusions/:id', authMiddleware, (req, res) => {
     db.prepare("UPDATE members SET status = 'active' WHERE id = ?").run(exclusion.user_id)
   }
 
-  auditLog(req.user.username, '自我排除管理', exclusion.user_id, action + ' exclusion for ' + exclusion.user_id, req.ip || '0.0.0.0')
+  auditLog(req.user.username, '自我排除管理', exclusion.user_id, action + ' exclusion for ' + exclusion.user_id, clientIp(req))
 
   res.json({ success: true })
 })
@@ -2219,7 +2169,7 @@ app.put('/api/admin/compliance/settings', authMiddleware, (req, res) => {
   })
   tx(updates)
 
-  auditLog(req.user.username, '合规设置更新', 'compliance_settings', 'Updated compliance settings', req.ip || '0.0.0.0')
+  auditLog(req.user.username, '合规设置更新', 'compliance_settings', 'Updated compliance settings', clientIp(req))
 
   res.json({ success: true })
 })
@@ -2285,7 +2235,7 @@ app.post('/api/admin/agents/settlements/calculate', authMiddleware, (req, res) =
     results.push({ agentId: agent.id, agentName: agent.brand, commissionRate: tier.rate, commissionAmount, upstreamFee, netAmount })
   }
 
-  auditLog(req.user.username, '代理结算计算', 'agent_settlements', 'Calculated settlements for period ' + periodStart + ' to ' + periodEnd, req.ip || '0.0.0.0')
+  auditLog(req.user.username, '代理结算计算', 'agent_settlements', 'Calculated settlements for period ' + periodStart + ' to ' + periodEnd, clientIp(req))
   res.json({ success: true, count: results.length, results })
 })
 
@@ -2297,7 +2247,7 @@ app.put('/api/admin/agents/settlements/:id/approve', authMiddleware, (req, res) 
     req.user.username, req.params.id
   )
 
-  auditLog(req.user.username, '代理结算审批', settlement.agent_id, 'Approved settlement #' + req.params.id + ' for ' + settlement.agent_name, req.ip || '0.0.0.0')
+  auditLog(req.user.username, '代理结算审批', settlement.agent_id, 'Approved settlement #' + req.params.id + ' for ' + settlement.agent_name, clientIp(req))
   res.json({ success: true })
 })
 
@@ -2334,7 +2284,7 @@ app.put('/api/admin/system/permissions/:role', authMiddleware, (req, res) => {
   })
   tx(permissions)
 
-  auditLog(req.user.username, '权限更新', role, 'Updated permissions for role: ' + role, req.ip || '0.0.0.0')
+  auditLog(req.user.username, '权限更新', role, 'Updated permissions for role: ' + role, clientIp(req))
   res.json({ success: true })
 })
 

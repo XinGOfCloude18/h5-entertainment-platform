@@ -61,6 +61,7 @@ import { ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useWalletStore } from '@/stores/wallet'
 import { showToast } from 'vant'
+import { copyToClipboard } from '@/utils/clipboard'
 
 const { t } = useI18n()
 const walletStore = useWalletStore()
@@ -73,8 +74,7 @@ const bonusTiers = [
 ]
 
 function copyAddress() {
-  navigator.clipboard?.writeText('TXkG4dABCDEF1234567890abcdef8f9Kz')
-  showToast({ message: t('invite.copied'), position: 'bottom' })
+  copyToClipboard('TXkG4dABCDEF1234567890abcdef8f9Kz', { message: t('invite.copied'), position: 'bottom' })
 }
 
 async function onSubmit() {
