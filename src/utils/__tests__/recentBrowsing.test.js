@@ -43,6 +43,21 @@ describe('utils/recentBrowsing', () => {
     expect(getRecentGames()).toEqual([])
   })
 
+  it('getRecentGames() returns empty array when stored data is corrupt', () => {
+    localStorage.setItem('recent_browsing_games', '{not json')
+    expect(getRecentGames()).toEqual([])
+  })
+
+  it('addRecentGame() defaults optional fields', () => {
+    addRecentGame({ id: 1, name: 'Game A' })
+    expect(getRecentGames()[0]).toMatchObject({
+      image: '',
+      provider: '',
+      category: '',
+      hot: false
+    })
+  })
+
   it('clearRecentGames() removes all stored games', () => {
     addRecentGame({ id: 1, name: 'Game A' })
     clearRecentGames()
