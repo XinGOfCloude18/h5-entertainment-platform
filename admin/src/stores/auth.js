@@ -35,7 +35,7 @@ export const useAuthStore = defineStore('auth', () => {
   })
 
 
-  async function login(username, password, selectedRole) {
+  async function login(username, password) {
     clearExpiredLock()
     if (isLocked.value) {
       return { success: false, locked: true, remainingMinutes: remainingLockTime.value }
@@ -43,7 +43,7 @@ export const useAuthStore = defineStore('auth', () => {
 
     let res = null
     try {
-      res = await adminLogin(username, password, selectedRole)
+      res = await adminLogin(username, password)
     } catch (err) {
       console.warn('Login API failed', err)
     }
@@ -55,15 +55,16 @@ export const useAuthStore = defineStore('auth', () => {
       localStorage.removeItem('admin_login_attempts')
       localStorage.removeItem('admin_lockout_until')
 
+      const serverRole = res.user?.role || ''
       user.value = {
         ...res.user,
         token: res.access_token,
-        role: selectedRole,
-        agentName: selectedRole === 'agent' ? (res.user.agentName || '代理') : '总平台',
+        role: serverRole,
+        agentName: serverRole === 'agent' ? (res.user.agentName || '代理') : '总平台',
         loginTime: new Date().toISOString()
       }
       localStorage.setItem('admin_user', JSON.stringify(user.value))
-      return { success: true }
+      return { success: true, role: serverRole }
     }
 
     loginAttempts.value++

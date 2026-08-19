@@ -1,10 +1,19 @@
 import { Router } from 'express'
 import jwt from 'jsonwebtoken'
 import db from './db.js'
+import { H5_JWT_SECRET } from './secrets.js'
 import { getGameUrl, getCasinoGames, verifyCallbackHash } from './pp-integration.js'
 
 const router = Router()
-const H5_JWT_SECRET = process.env.H5_JWT_SECRET || 'dada-h5-jwt-secret-2024'
+
+// Callback amounts arrive as strings; only finite numbers are accepted, and
+// negative values only where a debit is expected.
+function parseAmount(value, { allowNegative = false } = {}) {
+  const amount = Number(value)
+  if (!Number.isFinite(amount)) return null
+  if (!allowNegative && amount < 0) return null
+  return amount
+}
 
 // H5 Auth Middleware
 function h5Auth(req, res, next) {
@@ -109,16 +118,18 @@ router.post('/callback/bet', (req, res) => {
     return res.json({ error: 1, description: 'Invalid hash' })
   }
   const { userId, amount, reference, roundId, gameId } = params
+  const amt = parseAmount(amount)
+  if (amt === null) return res.json({ error: 1, description: 'Invalid amount' })
   const member = db.prepare('SELECT * FROM members WHERE id = ?').get(userId)
   if (!member) return res.json({ error: 2, description: 'User not found' })
-  if (member.balance < amount) return res.json({ error: 3, description: 'Insufficient balance' })
+  if (member.balance < amt) return res.json({ error: 3, description: 'Insufficient balance' })
   // Check duplicate
   const existing = db.prepare('SELECT id FROM pp_transactions WHERE reference = ?').get(reference)
   if (existing) return res.json({ error: 0, transactionId: existing.id, currency: 'CNY', cash: member.balance })
-  const newBalance = member.balance - amount
+  const newBalance = member.balance - amt
   db.prepare('UPDATE members SET balance = ? WHERE id = ?').run(newBalance, userId)
   const txResult = db.prepare(`INSERT INTO pp_transactions (reference, round_id, game_id, user_id, type, amount, balance_after) VALUES (?,?,?,?,?,?,?)`)
-    .run(reference, roundId, gameId || '', userId, 'bet', amount, newBalance)
+    .run(reference, roundId, gameId || '', userId, 'bet', amt, newBalance)
   res.json({
     error: 0,
     transactionId: String(txResult.lastInsertRowid),
@@ -134,15 +145,17 @@ router.post('/callback/result', (req, res) => {
     return res.json({ error: 1, description: 'Invalid hash' })
   }
   const { userId, amount, reference, roundId, gameId } = params
+  const amt = parseAmount(amount)
+  if (amt === null) return res.json({ error: 1, description: 'Invalid amount' })
   const member = db.prepare('SELECT * FROM members WHERE id = ?').get(userId)
   if (!member) return res.json({ error: 2, description: 'User not found' })
   // Check duplicate
   const existing = db.prepare('SELECT id FROM pp_transactions WHERE reference = ?').get(reference)
   if (existing) return res.json({ error: 0, transactionId: existing.id, currency: 'CNY', cash: member.balance })
-  const newBalance = member.balance + amount
+  const newBalance = member.balance + amt
   db.prepare('UPDATE members SET balance = ? WHERE id = ?').run(newBalance, userId)
   const txResult = db.prepare(`INSERT INTO pp_transactions (reference, round_id, game_id, user_id, type, amount, balance_after) VALUES (?,?,?,?,?,?,?)`)
-    .run(reference, roundId, gameId || '', userId, 'result', amount, newBalance)
+    .run(reference, roundId, gameId || '', userId, 'result', amt, newBalance)
   res.json({
     error: 0,
     transactionId: String(txResult.lastInsertRowid),
@@ -158,15 +171,17 @@ router.post('/callback/refund', (req, res) => {
     return res.json({ error: 1, description: 'Invalid hash' })
   }
   const { userId, amount, reference, roundId } = params
+  const amt = parseAmount(amount)
+  if (amt === null) return res.json({ error: 1, description: 'Invalid amount' })
   const member = db.prepare('SELECT * FROM members WHERE id = ?').get(userId)
   if (!member) return res.json({ error: 2, description: 'User not found' })
   // Check duplicate refund
   const existing = db.prepare("SELECT id FROM pp_transactions WHERE reference = ? AND type = 'refund'").get(reference)
   if (existing) return res.json({ error: 0, transactionId: existing.id, currency: 'CNY', cash: member.balance })
-  const newBalance = member.balance + amount
+  const newBalance = member.balance + amt
   db.prepare('UPDATE members SET balance = ? WHERE id = ?').run(newBalance, userId)
   const txResult = db.prepare(`INSERT INTO pp_transactions (reference, round_id, game_id, user_id, type, amount, balance_after) VALUES (?,?,?,?,?,?,?)`)
-    .run(reference, roundId, '', userId, 'refund', amount, newBalance)
+    .run(reference, roundId, '', userId, 'refund', amt, newBalance)
   res.json({
     error: 0,
     transactionId: String(txResult.lastInsertRowid),
@@ -182,14 +197,16 @@ router.post('/callback/bonusWin', (req, res) => {
     return res.json({ error: 1, description: 'Invalid hash' })
   }
   const { userId, amount, reference, roundId, gameId } = params
+  const amt = parseAmount(amount)
+  if (amt === null) return res.json({ error: 1, description: 'Invalid amount' })
   const member = db.prepare('SELECT * FROM members WHERE id = ?').get(userId)
   if (!member) return res.json({ error: 2, description: 'User not found' })
   const existing = db.prepare('SELECT id FROM pp_transactions WHERE reference = ?').get(reference)
   if (existing) return res.json({ error: 0, transactionId: existing.id, currency: 'CNY', cash: member.balance })
-  const newBalance = member.balance + amount
+  const newBalance = member.balance + amt
   db.prepare('UPDATE members SET balance = ? WHERE id = ?').run(newBalance, userId)
   const txResult = db.prepare(`INSERT INTO pp_transactions (reference, round_id, game_id, user_id, type, amount, balance_after) VALUES (?,?,?,?,?,?,?)`)
-    .run(reference, roundId, gameId || '', userId, 'bonusWin', amount, newBalance)
+    .run(reference, roundId, gameId || '', userId, 'bonusWin', amt, newBalance)
   res.json({
     error: 0,
     transactionId: String(txResult.lastInsertRowid),
@@ -205,14 +222,16 @@ router.post('/callback/jackpotWin', (req, res) => {
     return res.json({ error: 1, description: 'Invalid hash' })
   }
   const { userId, amount, reference, roundId, gameId, jackpotId } = params
+  const amt = parseAmount(amount)
+  if (amt === null) return res.json({ error: 1, description: 'Invalid amount' })
   const member = db.prepare('SELECT * FROM members WHERE id = ?').get(userId)
   if (!member) return res.json({ error: 2, description: 'User not found' })
   const existing = db.prepare('SELECT id FROM pp_transactions WHERE reference = ?').get(reference)
   if (existing) return res.json({ error: 0, transactionId: existing.id, currency: 'CNY', cash: member.balance })
-  const newBalance = member.balance + amount
+  const newBalance = member.balance + amt
   db.prepare('UPDATE members SET balance = ? WHERE id = ?').run(newBalance, userId)
   const txResult = db.prepare(`INSERT INTO pp_transactions (reference, round_id, game_id, user_id, type, amount, balance_after) VALUES (?,?,?,?,?,?,?)`)
-    .run(reference, roundId, gameId || '', userId, 'jackpotWin', amount, newBalance)
+    .run(reference, roundId, gameId || '', userId, 'jackpotWin', amt, newBalance)
   res.json({
     error: 0,
     transactionId: String(txResult.lastInsertRowid),
@@ -238,14 +257,16 @@ router.post('/callback/promoWin', (req, res) => {
     return res.json({ error: 1, description: 'Invalid hash' })
   }
   const { userId, amount, reference, roundId, campaignId, campaignType } = params
+  const amt = parseAmount(amount)
+  if (amt === null) return res.json({ error: 1, description: 'Invalid amount' })
   const member = db.prepare('SELECT * FROM members WHERE id = ?').get(userId)
   if (!member) return res.json({ error: 2, description: 'User not found' })
   const existing = db.prepare('SELECT id FROM pp_transactions WHERE reference = ?').get(reference)
   if (existing) return res.json({ error: 0, transactionId: existing.id, currency: 'CNY', cash: member.balance })
-  const newBalance = member.balance + amount
+  const newBalance = member.balance + amt
   db.prepare('UPDATE members SET balance = ? WHERE id = ?').run(newBalance, userId)
   const txResult = db.prepare(`INSERT INTO pp_transactions (reference, round_id, game_id, user_id, type, amount, balance_after) VALUES (?,?,?,?,?,?,?)`)
-    .run(reference, roundId || '', '', userId, 'promoWin', amount, newBalance)
+    .run(reference, roundId || '', '', userId, 'promoWin', amt, newBalance)
   res.json({
     error: 0,
     transactionId: String(txResult.lastInsertRowid),
@@ -267,14 +288,17 @@ router.post('/callback/adjustment', (req, res) => {
     return res.json({ error: 1, description: 'Invalid hash' })
   }
   const { userId, amount, reference, roundId, gameId } = params
+  const amt = parseAmount(amount, { allowNegative: true })
+  if (amt === null) return res.json({ error: 1, description: 'Invalid amount' })
   const member = db.prepare('SELECT * FROM members WHERE id = ?').get(userId)
   if (!member) return res.json({ error: 2, description: 'User not found' })
   const existing = db.prepare('SELECT id FROM pp_transactions WHERE reference = ?').get(reference)
   if (existing) return res.json({ error: 0, transactionId: existing.id, currency: 'CNY', cash: member.balance })
-  const newBalance = member.balance + amount
+  const newBalance = member.balance + amt
+  if (newBalance < 0) return res.json({ error: 3, description: 'Insufficient balance' })
   db.prepare('UPDATE members SET balance = ? WHERE id = ?').run(newBalance, userId)
   const txResult = db.prepare(`INSERT INTO pp_transactions (reference, round_id, game_id, user_id, type, amount, balance_after) VALUES (?,?,?,?,?,?,?)`)
-    .run(reference, roundId || '', gameId || '', userId, 'adjustment', amount, newBalance)
+    .run(reference, roundId || '', gameId || '', userId, 'adjustment', amt, newBalance)
   res.json({
     error: 0,
     transactionId: String(txResult.lastInsertRowid),

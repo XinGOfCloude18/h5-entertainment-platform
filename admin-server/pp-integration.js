@@ -6,18 +6,18 @@ import querystring from 'querystring'
 // Sensitive credentials - must be set via environment variables. No fallback allowed.
 
 const PP_API_URL = process.env.PP_API_URL || 'https://api.prerelease-env.biz'
-const PP_SECURE_LOGIN = process.env.PP_SECURE_LOGIN || 'zf1487_bygame02'
-const PP_SECRET = process.env.PP_SECRET || '8IPy9SfmmITyT8Wh'
+const PP_SECURE_LOGIN = process.env.PP_SECURE_LOGIN
+const PP_SECRET = process.env.PP_SECRET
 const PP_CONFIGURED = !!(PP_SECRET && PP_SECURE_LOGIN)
 if (!PP_CONFIGURED) {
-  console.warn('WARNING: PP_SECRET and/or PP_SECURE_LOGIN not set. PP game API will be unavailable.')
+  console.warn('WARNING: PP_SECRET and/or PP_SECURE_LOGIN not set. PP game API and wallet callbacks are disabled.')
 }
 
-const PP_PROVIDER_ID = process.env.PP_PROVIDER_ID || 'bygame02'
-const PP_STYLENAME = process.env.PP_STYLENAME || 'bygame02'
+const PP_PROVIDER_ID = process.env.PP_PROVIDER_ID || ''
+const PP_STYLENAME = process.env.PP_STYLENAME || ''
 const PP_CURRENCY = process.env.PP_CURRENCY || 'USDT'
-const PP_LOBBY_URL = process.env.PP_LOBBY_URL || 'https://dd.top/#/home'
-const PP_CASHIER_URL = process.env.PP_CASHIER_URL || 'https://dd.top/#/deposit'
+const PP_LOBBY_URL = process.env.PP_LOBBY_URL || ''
+const PP_CASHIER_URL = process.env.PP_CASHIER_URL || ''
 
 // ==================== HASH CALCULATION ====================
 // PP hash: MD5 of all POST param values sorted by key + SECRET
@@ -102,9 +102,14 @@ export async function getGameUrl({ symbol, token, externalPlayerId, language = '
 
 // ==================== VERIFY CALLBACK HASH ====================
 export function verifyCallbackHash(params) {
-  const { hash, ...rest } = params
+  if (!PP_CONFIGURED) return false
+  const { hash, ...rest } = params || {}
+  if (!hash || typeof hash !== 'string') return false
   const expected = calcHash(rest)
-  return hash === expected
+  const provided = Buffer.from(hash.toLowerCase())
+  const target = Buffer.from(expected)
+  if (provided.length !== target.length) return false
+  return crypto.timingSafeEqual(provided, target)
 }
 
 export { PP_CONFIGURED, PP_PROVIDER_ID, PP_CURRENCY }

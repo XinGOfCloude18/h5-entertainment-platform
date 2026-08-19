@@ -4,25 +4,6 @@
       <h1 class="login-title">大大娱乐</h1>
       <p class="login-subtitle">管理后台登录</p>
 
-      <div class="role-selector">
-        <el-button
-          :type="selectedRole === 'superadmin' ? 'danger' : 'default'"
-          class="role-btn"
-          @click="selectedRole = 'superadmin'"
-        >
-          <el-icon><Setting /></el-icon>
-          超级管理员
-        </el-button>
-        <el-button
-          :type="selectedRole === 'agent' ? 'warning' : 'default'"
-          class="role-btn"
-          @click="selectedRole = 'agent'"
-        >
-          <el-icon><UserFilled /></el-icon>
-          代理管理员
-        </el-button>
-      </div>
-
       <el-form :model="form" :rules="rules" ref="formRef" @submit.prevent="handleLogin">
         <el-form-item prop="username">
           <el-input v-model="form.username" placeholder="请输入用户名" prefix-icon="User" size="large" />
@@ -37,9 +18,6 @@
         </el-form-item>
       </el-form>
 
-      <div style="text-align: center; color: #555; font-size: 12px; margin-top: 16px;">
-        演示账号: admin / demo
-      </div>
     </div>
   </div>
 </template>
@@ -54,9 +32,8 @@ const router = useRouter()
 const authStore = useAuthStore()
 const formRef = ref(null)
 const loading = ref(false)
-const selectedRole = ref('superadmin')
 
-const form = reactive({ username: 'admin', password: 'demo' })
+const form = reactive({ username: '', password: '' })
 const rules = {
   username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
   password: [{ required: true, message: '请输入密码', trigger: 'blur' }]
@@ -70,10 +47,10 @@ async function handleLogin() {
   }
   loading.value = true
   try {
-    const result = await authStore.login(form.username, form.password, selectedRole.value)
+    const result = await authStore.login(form.username, form.password)
     if (result.success) {
       ElMessage.success('登录成功')
-      router.push(selectedRole.value === 'superadmin' ? '/super/dashboard' : '/agent/dashboard')
+      router.push(result.role === 'agent' ? '/agent/dashboard' : '/super/dashboard')
     } else if (result.locked) {
       ElMessage.error(`登录失败次数过多，账户已锁定${result.remainingMinutes}分钟`)
     } else {
