@@ -31,7 +31,7 @@ export const useAppStore = defineStore('app', () => {
         return res
       }
     } catch (e) {
-      console.warn('Banners API failed, using default data', e)
+      console.error('Banners API failed, using default data', e)
     }
     if (!banners.value.length) banners.value = defaultBanners
     return banners.value
@@ -45,7 +45,7 @@ export const useAppStore = defineStore('app', () => {
         return res
       }
     } catch (e) {
-      console.warn('Announcements API failed, using default data', e)
+      console.error('Announcements API failed, using default data', e)
     }
     if (!announcements.value.length) announcements.value = defaultAnnouncements
     return announcements.value
@@ -59,7 +59,7 @@ export const useAppStore = defineStore('app', () => {
         return res
       }
     } catch (e) {
-      console.warn('Config API failed, using defaults', e)
+      console.error('Config API failed, using defaults', e)
     }
     config.value = {
       siteName: 'H5 Entertainment',

@@ -18,7 +18,8 @@ api.interceptors.request.use(config => {
         config.headers.Authorization = `Bearer ${parsed.token}`
       }
     } catch (e) {
-      // ignore
+      console.error('[api] stored admin_user is not valid JSON, clearing it', e)
+      localStorage.removeItem('admin_user')
     }
   }
   return config
@@ -28,11 +29,26 @@ api.interceptors.request.use(config => {
 api.interceptors.response.use(
   response => response.data,
   error => {
-    if (error.response?.status === 401) {
+    const { method, url } = error.config || {}
+    const status = error.response?.status
+    console.error(
+      `[api] ${String(method || 'GET').toUpperCase()} ${url || '(unknown url)'} failed` +
+        (status ? ` with ${status}` : ''),
+      error
+    )
+
+    if (status === 401) {
       localStorage.removeItem('admin_user')
       window.location.href = '/login'
     }
-    return Promise.reject(error.response?.data || error)
+
+    // Reject with an Error so status/response context survives, while exposing
+    // the server-provided reason as the message.
+    const serverMessage = error.response?.data?.error || error.response?.data?.message
+    if (serverMessage) {
+      error.message = serverMessage
+    }
+    return Promise.reject(error)
   }
 )
 

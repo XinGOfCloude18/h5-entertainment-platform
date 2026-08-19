@@ -1,6 +1,7 @@
 import Database from 'better-sqlite3'
 import { fileURLToPath } from 'url'
 import path from 'path'
+import { logWarn } from './logger.js'
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url))
 const dbPath = path.join(__dirname, 'admin.db')
@@ -637,7 +638,7 @@ export function initDB() {
 
   // Migrate sk7755_games: add category_id, sub_category_id, display_name, is_visible, display_order
   const sk7755Cols = (() => {
-    try { return db.prepare("PRAGMA table_info(sk7755_games)").all().map(c => c.name) } catch { return [] }
+    try { return db.prepare("PRAGMA table_info(sk7755_games)").all().map(c => c.name) } catch (err) { logWarn('initDB:sk7755_games table_info', err); return [] }
   })()
   const sk7755Migrations = [
     { col: 'category_id', sql: 'ALTER TABLE sk7755_games ADD COLUMN category_id INTEGER' },
@@ -648,7 +649,7 @@ export function initDB() {
   ]
   for (const m of sk7755Migrations) {
     if (sk7755Cols.length && !sk7755Cols.includes(m.col)) {
-      try { db.prepare(m.sql).run() } catch {}
+      try { db.prepare(m.sql).run() } catch (err) { logWarn('initDB:migrate sk7755_games.' + m.col, err) }
     }
   }
 
@@ -664,7 +665,7 @@ export function initDB() {
   ]
   for (const m of gamesMigrations) {
     if (!gamesCols.includes(m.col)) {
-      try { db.prepare(m.sql).run() } catch {}
+      try { db.prepare(m.sql).run() } catch (err) { logWarn('initDB:migrate games.' + m.col, err) }
     }
   }
 

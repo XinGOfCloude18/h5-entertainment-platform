@@ -74,7 +74,10 @@ onMounted(async () => {
       Object.assign(exclusionStatus, data)
     }
   } catch (e) {
-    // Not excluded
+    // 404 simply means the account is not excluded
+    if (e?.response?.status !== 404) {
+      console.error('Failed to load self-exclusion status', e)
+    }
   }
 })
 

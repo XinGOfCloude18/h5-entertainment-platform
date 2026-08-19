@@ -34,6 +34,7 @@ export const useGameStore = defineStore('game', () => {
   const loading = ref(false)
   const fetched = ref(false)
   const sk7755Fetched = ref(false)
+  const error = ref(null)
 
   const hotGames = computed(() => {
     const local = games.value.filter(g => g.hot || g.is_hot)
@@ -58,6 +59,7 @@ export const useGameStore = defineStore('game', () => {
 
   async function fetchGames(params = {}) {
     loading.value = true
+    error.value = null
     try {
       const res = await getGamesApi(params)
       const list = res?.list || res
@@ -67,28 +69,28 @@ export const useGameStore = defineStore('game', () => {
         }
         fetched.value = true
       }
+      await fetchSK7755Games()
+      return games.value
     } catch (e) {
-      console.warn('Games API failed', e)
+      error.value = e
+      console.error('Games API failed', e)
+      throw e
+    } finally {
+      loading.value = false
     }
-    await fetchSK7755Games()
-    loading.value = false
-    return games.value
   }
 
   async function fetchSK7755Games() {
-    try {
-      const res = await getSK7755GamesApi()
-      const list = res?.list || []
-      if (Array.isArray(list)) {
-        sk7755Games.value = list.map(g => ({
-          ...g,
-          source: 'sk7755',
-        }))
-        sk7755Fetched.value = true
-      }
-    } catch (e) {
-      console.warn('SK7755 games API failed', e)
+    const res = await getSK7755GamesApi()
+    const list = res?.list || []
+    if (Array.isArray(list)) {
+      sk7755Games.value = list.map(g => ({
+        ...g,
+        source: 'sk7755',
+      }))
+      sk7755Fetched.value = true
     }
+    return sk7755Games.value
   }
 
   function getGameById(id) {
@@ -98,7 +100,7 @@ export const useGameStore = defineStore('game', () => {
   }
 
   return {
-    games, sk7755Games, categories, loading, hotGames,
+    games, sk7755Games, categories, loading, error, hotGames,
     getGamesByCategory, fetchGames, fetchSK7755Games, getGameById,
   }
 })

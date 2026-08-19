@@ -2,6 +2,7 @@ import { Router } from 'express'
 import jwt from 'jsonwebtoken'
 import bcrypt from 'bcrypt'
 import db from './db.js'
+import { logError, logWarn } from './logger.js'
 import { getGameUrl } from './pp-integration.js'
 import { getCachedGames, CATEGORY_MAP } from './services/sk7755/gameSync.js'
 import { login as sk7755Login } from './services/sk7755/client.js'
@@ -13,7 +14,10 @@ function getCategoryLabel(categoryId) {
   try {
     const cat = db.prepare('SELECT name_zh FROM game_categories WHERE id = ?').get(categoryId)
     return cat ? cat.name_zh : ''
-  } catch { return '' }
+  } catch (err) {
+    logWarn('getCategoryLabel', err)
+    return ''
+  }
 }
 
 // Helper: get all categories as a map
@@ -21,7 +25,10 @@ function getCategoryMap() {
   try {
     const cats = db.prepare('SELECT id, code, name_zh, name_en, icon FROM game_categories WHERE is_enabled = 1 ORDER BY sort_order').all()
     return Object.fromEntries(cats.map(c => [c.id, c]))
-  } catch { return {} }
+  } catch (err) {
+    logWarn('getCategoryMap', err)
+    return {}
+  }
 }
 
 const router = Router()
@@ -67,7 +74,7 @@ function h5Auth(req, res, next) {
 // ==================== AUTH ====================
 
 // POST /api/h5/auth/register
-router.post('/auth/register', async (req, res) => {
+router.post('/auth/register', async (req, res, next) => {
   try {
     const { username, password, phone } = req.body
     if (!username || !password) {
@@ -86,24 +93,28 @@ router.post('/auth/register', async (req, res) => {
       return res.status(400).json({ error: 'Username already exists' })
     }
 
-    // Create member entry (visible in admin dashboard)
-    const memberCount = db.prepare('SELECT COUNT(*) as c FROM members').get().c
-    const memberId = 'M' + (10000 + memberCount + 1)
-
-    // Insert into members table
-    db.prepare(`INSERT INTO members (id, username, agent, vip, balance, status, registered, last_login, total_deposit, total_withdraw, tags)
-      VALUES (?, ?, '', 0, 0, 'active', datetime('now'), datetime('now'), 0, 0, '["H5"]')`).run(memberId, username)
-
-    // Insert into h5_users table with hashed password
     const hashedPassword = await bcrypt.hash(password, 10)
-    db.prepare(`INSERT INTO h5_users (username, password, phone, nickname, member_id, last_login)
-      VALUES (?, ?, ?, ?, ?, datetime('now'))`).run(username, hashedPassword, phone || '', username, memberId)
 
-    const h5user = db.prepare('SELECT * FROM h5_users WHERE username = ?').get(username)
+    // All inserts share one transaction so a mid-way failure cannot leave an
+    // orphan member row behind
+    const createUser = db.transaction(() => {
+      const memberCount = db.prepare('SELECT COUNT(*) as c FROM members').get().c
+      const memberId = 'M' + (10000 + memberCount + 1)
 
-    // Send welcome message
-    db.prepare(`INSERT INTO h5_user_messages (member_id, title, content, type)
-      VALUES (?, '欢迎加入平台', '感谢您注册成为我们的会员，祝您游戏愉快！新用户可领取首充奖励。', 'system')`).run(memberId)
+      db.prepare(`INSERT INTO members (id, username, agent, vip, balance, status, registered, last_login, total_deposit, total_withdraw, tags)
+        VALUES (?, ?, '', 0, 0, 'active', datetime('now'), datetime('now'), 0, 0, '["H5"]')`).run(memberId, username)
+
+      db.prepare(`INSERT INTO h5_users (username, password, phone, nickname, member_id, last_login)
+        VALUES (?, ?, ?, ?, ?, datetime('now'))`).run(username, hashedPassword, phone || '', username, memberId)
+
+      // Send welcome message
+      db.prepare(`INSERT INTO h5_user_messages (member_id, title, content, type)
+        VALUES (?, '欢迎加入平台', '感谢您注册成为我们的会员，祝您游戏愉快！新用户可领取首充奖励。', 'system')`).run(memberId)
+
+      return { memberId, h5user: db.prepare('SELECT * FROM h5_users WHERE username = ?').get(username) }
+    })
+
+    const { memberId, h5user } = createUser()
 
     const token = jwt.sign(
       { id: h5user.id, username, memberId, role: 'h5_user' },
@@ -124,12 +135,13 @@ router.post('/auth/register', async (req, res) => {
       }
     })
   } catch (err) {
-    return res.status(500).json({ error: 'Registration failed' })
+    logError('h5 register', err)
+    return next(err)
   }
 })
 
 // POST /api/h5/auth/login
-router.post('/auth/login', async (req, res) => {
+router.post('/auth/login', async (req, res, next) => {
   try {
     const { phone, password, username } = req.body
     const loginName = username || phone
@@ -174,7 +186,8 @@ router.post('/auth/login', async (req, res) => {
       }
     })
   } catch (err) {
-    return res.status(500).json({ error: 'Login failed' })
+    logError('h5 login', err)
+    return next(err)
   }
 })
 
@@ -215,7 +228,7 @@ router.put('/user/profile', h5Auth, (req, res) => {
 })
 
 // PUT /api/h5/user/password
-router.put('/user/password', h5Auth, async (req, res) => {
+router.put('/user/password', h5Auth, async (req, res, next) => {
   try {
     const { oldPassword, newPassword } = req.body
     if (!oldPassword || !newPassword) {
@@ -235,7 +248,8 @@ router.put('/user/password', h5Auth, async (req, res) => {
     db.prepare('UPDATE h5_users SET password = ? WHERE id = ?').run(hashedNewPassword, req.h5user.id)
     res.json({ success: true })
   } catch (err) {
-    return res.status(500).json({ error: 'Password change failed' })
+    logError('h5 password change', err)
+    return next(err)
   }
 })
 
@@ -451,14 +465,18 @@ router.post('/games/:id/launch', h5Auth, async (req, res) => {
 
   try {
     const result = await getGameUrl({ symbol: game.pp_game_id || game.name, token: req.h5user.memberId, externalPlayerId: req.h5user.memberId })
+    if (!result.gameURL) {
+      logError('h5 game launch', new Error('PP returned no gameURL: ' + JSON.stringify(result)))
+      return res.status(502).json({ error: 'Failed to launch game', success: false })
+    }
     res.json({
       success: true,
       launchUrl: result.gameURL,
       game: { id: game.id, name: game.display_name || game.name }
     })
   } catch (err) {
-    console.error('Game launch error:', err.message)
-    res.status(500).json({ error: 'Failed to launch game', details: err.message })
+    logError('h5 game launch', err)
+    res.status(502).json({ error: 'Failed to launch game', success: false })
   }
 })
 
@@ -478,13 +496,18 @@ router.post('/games/:id/demo', async (req, res) => {
       externalPlayerId: 'demo_player',
       playMode: 'DEMO'
     })
+    if (!result.gameURL) {
+      logError('h5 game demo launch', new Error('PP returned no gameURL: ' + JSON.stringify(result)))
+      return res.status(502).json({ error: 'Failed to launch demo', success: false })
+    }
     res.json({
       success: true,
       launchUrl: result.gameURL,
       game: { id: game.id, name: game.display_name || game.name }
     })
   } catch (err) {
-    res.status(500).json({ error: 'Failed to launch demo', success: false })
+    logError('h5 game demo launch', err)
+    res.status(502).json({ error: 'Failed to launch demo', success: false })
   }
 })
 
@@ -521,8 +544,8 @@ router.get('/sk7755/games', (req, res) => {
     h5CacheSet(cacheKey, result, 5 * 60 * 1000)
     res.json(result)
   } catch (err) {
-    console.error('[SK7755] Games list error:', err.message)
-    res.json({ list: [], total: 0 })
+    logError('h5 sk7755 games list', err)
+    res.status(500).json({ error: 'Failed to load games' })
   }
 })
 
@@ -546,8 +569,8 @@ router.post('/sk7755/launch', h5Auth, async (req, res) => {
       res.json({ success: false, error: result.message || 'Launch failed', code: result.code })
     }
   } catch (err) {
-    console.error('Game launch error:', err.message)
-    res.status(500).json({ error: 'Failed to launch game', success: false })
+    logError('h5 sk7755 game launch', err)
+    res.status(502).json({ error: 'Failed to launch game', success: false })
   }
 })
 
@@ -579,16 +602,20 @@ router.post('/game/launch', h5Auth, async (req, res) => {
         return res.status(400).json({ error: 'Game not launchable', success: false })
       }
       const result = await getGameUrl({ symbol: game.pp_game_id, token: req.h5user.memberId, externalPlayerId: req.h5user.memberId })
+      if (!result.gameURL) {
+        logError('h5 unified game launch', new Error('PP returned no gameURL: ' + JSON.stringify(result)))
+        return res.status(502).json({ error: 'Failed to launch game', success: false })
+      }
       return res.json({ success: true, launchUrl: result.gameURL })
     }
   } catch (err) {
-    console.error('Unified game launch error:', err.message)
-    res.status(500).json({ error: 'Failed to launch game', success: false })
+    logError('h5 unified game launch', err)
+    res.status(502).json({ error: 'Failed to launch game', success: false })
   }
 })
 
 // GET /api/h5/categories — returns all enabled game categories
-router.get('/categories', (req, res) => {
+router.get('/categories', (req, res, next) => {
   const cached = h5CacheGet('h5:categories')
   if (cached) return res.json(cached)
 
@@ -597,7 +624,7 @@ router.get('/categories', (req, res) => {
     h5CacheSet('h5:categories', cats, 5 * 60 * 1000)
     res.json(cats)
   } catch (err) {
-    res.json([])
+    next(err)
   }
 })
 

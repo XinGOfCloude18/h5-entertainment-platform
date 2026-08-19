@@ -3,6 +3,7 @@
  * caches them in SQLite + memory, and auto-refreshes every 10 minutes.
  */
 import { getGameList } from './client.js'
+import { logError } from '../../logger.js'
 
 let db = null
 const REFRESH_INTERVAL = 10 * 60 * 1000 // 10 minutes
@@ -140,8 +141,7 @@ async function syncPlatform(platformCode) {
     // SK7755 API returns { code, result: { data: [...] } }
     const gameList = result?.result?.data || result?.data || (Array.isArray(result?.result) ? result.result : null)
     if (result.code !== '0000' || !Array.isArray(gameList)) {
-      console.warn(`[SK7755 Sync] Platform ${platformCode} code=${result.code}, no game array found`)
-      return 0
+      throw new Error(`code=${result.code}, no game array found`)
     }
 
     const platform = PLATFORMS.find(p => p.code === platformCode)
@@ -178,8 +178,8 @@ async function syncPlatform(platformCode) {
 
     return gameList.length
   } catch (err) {
-    console.error(`[SK7755 Sync] Error syncing platform ${platformCode}:`, err.message)
-    return 0
+    logError(`SK7755 Sync:${platformCode}`, err)
+    throw err
   }
 }
 
@@ -190,10 +190,16 @@ export async function syncAll() {
   console.log('[SK7755 Sync] Starting full sync...')
   const platforms = db.prepare('SELECT code FROM sk7755_platforms WHERE enabled = 1').all()
   let totalGames = 0
+  const failures = []
 
+  // One failing platform must not abort the others, but every failure is
+  // reported back to the caller instead of being counted as zero games
   for (const p of platforms) {
-    const count = await syncPlatform(p.code)
-    totalGames += count
+    try {
+      totalGames += await syncPlatform(p.code)
+    } catch (err) {
+      failures.push({ platform: p.code, error: err.message })
+    }
   }
 
   // Refresh in-memory cache
@@ -206,8 +212,8 @@ export async function syncAll() {
   `).all()
   cacheTimestamp = Date.now()
 
-  console.log(`[SK7755 Sync] Complete — ${totalGames} games across ${platforms.length} platforms`)
-  return totalGames
+  console.log(`[SK7755 Sync] Complete — ${totalGames} games across ${platforms.length - failures.length}/${platforms.length} platforms`)
+  return { totalGames, failures }
 }
 
 /**
@@ -215,11 +221,11 @@ export async function syncAll() {
  */
 export function startAutoSync() {
   // Sync on startup (delayed to avoid blocking)
-  setTimeout(() => syncAll().catch(err => console.error('[SK7755 Sync] Initial sync error:', err)), 5000)
+  setTimeout(() => syncAll().catch(err => logError('SK7755 Sync:initial', err)), 5000)
 
   // Schedule periodic refresh
   refreshTimer = setInterval(() => {
-    syncAll().catch(err => console.error('[SK7755 Sync] Refresh error:', err))
+    syncAll().catch(err => logError('SK7755 Sync:refresh', err))
   }, REFRESH_INTERVAL)
 
   console.log(`[SK7755 Sync] Auto-sync scheduled every ${REFRESH_INTERVAL / 60000} minutes`)

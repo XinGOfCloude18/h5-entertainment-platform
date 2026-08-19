@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { processCallback } from './callbackHandler.js'
+import { logError } from '../../logger.js'
 
 const router = Router()
 
@@ -15,7 +16,7 @@ router.post('/wallet', (req, res) => {
 
     return res.json(result)
   } catch (err) {
-    console.error('[SK7755 Callback] Error:', err.message)
+    logError('SK7755 Callback', err)
     return res.json({ code: '9999', message: 'Internal Error' })
   }
 })
