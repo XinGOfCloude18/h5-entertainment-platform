@@ -164,7 +164,7 @@
 <script setup>
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { showToast } from 'vant'
+import { copyToClipboard } from '@/utils/clipboard'
 
 const { t } = useI18n()
 
@@ -199,13 +199,11 @@ const rules = computed(() => [
 ])
 
 function copyCode() {
-  navigator.clipboard?.writeText('ABC123')
-  showToast({ message: t('invite.copied'), position: 'bottom' })
+  copyToClipboard('ABC123', { message: t('invite.copied'), position: 'bottom' })
 }
 
 function copyLink() {
-  navigator.clipboard?.writeText('https://h5play.com/r/ABC123')
-  showToast({ message: t('invite.copied'), position: 'bottom' })
+  copyToClipboard('https://h5play.com/r/ABC123', { message: t('invite.copied'), position: 'bottom' })
 }
 
 function shareTelegram() {

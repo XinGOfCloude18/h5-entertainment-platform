@@ -86,6 +86,7 @@
 import { ref, computed, onMounted, watch, nextTick } from 'vue'
 import { getGameStats, getGameRanking, getProviderGGR as fetchProviderGGR } from '@/api/games'
 import * as echarts from 'echarts'
+import { formatCompact as formatNum } from '@/utils/format'
 
 const period = ref('7d')
 const activeTab = ref('popularity')
@@ -96,8 +97,6 @@ const overview = ref({ totalGames: 0, activeGames: 0, totalBets: 0, totalGGR: 0 
 const popularityRanking = ref([])
 const gameGGR = ref([])
 const providerGGR = ref([])
-
-function formatNum(n) { return n >= 10000 ? (n / 10000).toFixed(1) + '万' : n.toLocaleString() }
 
 
 

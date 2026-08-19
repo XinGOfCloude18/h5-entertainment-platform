@@ -100,7 +100,7 @@
               </div>
             </div>
             <div class="item-right">
-              <span class="item-amount" :class="{ negative: record.amount < 0 }">{{ record.amount > 0 ? '+' : '' }}{{ record.amount.toFixed(2) }} USDT</span>
+              <span class="item-amount" :class="{ negative: record.amount < 0 }">{{ formatSigned(record.amount) }} USDT</span>
               <span class="item-status" :class="record.statusClass">{{ record.status }}</span>
             </div>
           </div>
@@ -140,6 +140,7 @@
 import { ref, computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { showToast } from 'vant'
+import { formatSigned } from '@/utils/format'
 const { t } = useI18n()
 
 const activeTab = ref('all')

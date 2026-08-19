@@ -240,6 +240,8 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { getDepositStats, getDepositOrders, approveDeposit, rejectDeposit, exportDepositsCSV, getDepositChannels, saveDepositChannel, deleteDepositChannel } from '@/api/finance'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Download, CopyDocument, Check, Close } from '@element-plus/icons-vue'
+import { exportCsv } from '@/utils/csv'
+import { copyToClipboard } from '@/utils/clipboard'
 
 const search = ref('')
 const statusFilter = ref('')
@@ -316,11 +318,7 @@ function isTRC20(row) {
 }
 
 function copyText(text) {
-  navigator.clipboard.writeText(text).then(() => {
-    ElMessage.success('已复制')
-  }).catch(() => {
-    ElMessage.warning('复制失败')
-  })
+  copyToClipboard(text)
 }
 
 function approveOrder(row) {
@@ -411,19 +409,7 @@ async function batchReject() {
 }
 
 async function exportCSV() {
-  try {
-    const response = await exportDepositsCSV()
-    const blob = new Blob([response], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = 'deposits_export.csv'
-    link.click()
-    URL.revokeObjectURL(url)
-    ElMessage.success('导出成功')
-  } catch (e) {
-    ElMessage.error('导出失败')
-  }
+  await exportCsv(() => exportDepositsCSV(), 'deposits_export.csv')
 }
 
 function refreshStats() {

@@ -218,6 +218,8 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { getWithdrawOrders, updateWithdrawStatus, batchWithdrawals, exportWithdrawalsCSV } from '@/api/finance'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Check, Close, Download } from '@element-plus/icons-vue'
+import { exportCsv } from '@/utils/csv'
+import { copyToClipboard } from '@/utils/clipboard'
 
 const search = ref('')
 const statusFilter = ref('')
@@ -318,7 +320,7 @@ function getStepActive(status) {
 }
 
 function copyText(text) {
-  navigator.clipboard.writeText(text).then(() => ElMessage.success('已复制')).catch(() => ElMessage.warning('复制失败'))
+  copyToClipboard(text)
 }
 
 function showApproveDialog(row) {
@@ -413,19 +415,7 @@ async function batchAction(action) {
 }
 
 async function exportCSV() {
-  try {
-    const response = await exportWithdrawalsCSV()
-    const blob = new Blob([response], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = 'withdrawals_export.csv'
-    link.click()
-    URL.revokeObjectURL(url)
-    ElMessage.success('导出成功')
-  } catch (e) {
-    ElMessage.error('导出失败')
-  }
+  await exportCsv(() => exportWithdrawalsCSV(), 'withdrawals_export.csv')
 }
 </script>
 

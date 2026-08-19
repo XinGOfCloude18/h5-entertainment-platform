@@ -87,6 +87,7 @@
 <script setup>
 import { ref, reactive } from 'vue'
 import { ElMessage } from 'element-plus'
+import { copyToClipboard } from '@/utils/clipboard'
 
 const activeTab = ref('links')
 const referralLink = ref('')
@@ -100,6 +101,6 @@ const teamMembers = ref([])
 
 const settlementList = ref([])
 
-function copyLink() { navigator.clipboard?.writeText(referralLink.value); ElMessage.success('链接已复制') }
+function copyLink() { copyToClipboard(referralLink.value, { successMessage: '链接已复制' }) }
 function generateLink() { referralLink.value = `${window.location.origin}/r/?ref=${trackingParam.value || Date.now()}`; ElMessage.success('新链接已生成') }
 </script>

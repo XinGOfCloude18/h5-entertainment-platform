@@ -151,6 +151,8 @@ import { ref, reactive, computed, onMounted } from 'vue'
 import { getDeposits, updateDeposit, createManualDeposit, exportDepositsCSV } from '@/api/finance'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { Plus, Download, CopyDocument, Check, Close } from '@element-plus/icons-vue'
+import { exportCsv } from '@/utils/csv'
+import { copyToClipboard } from '@/utils/clipboard'
 
 const search = ref('')
 const statusFilter = ref('')
@@ -218,11 +220,7 @@ function isTRC20(row) {
 }
 
 function copyTxHash(hash) {
-  navigator.clipboard.writeText(hash).then(() => {
-    ElMessage.success('已复制TxHash')
-  }).catch(() => {
-    ElMessage.warning('复制失败，请手动复制')
-  })
+  copyToClipboard(hash, { successMessage: '已复制TxHash', failureMessage: '复制失败，请手动复制' })
 }
 
 async function submitManualDeposit() {
@@ -255,19 +253,7 @@ async function submitManualDeposit() {
 }
 
 async function exportCSV() {
-  try {
-    const response = await exportDepositsCSV()
-    const blob = new Blob([response], { type: 'text/csv;charset=utf-8;' })
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = 'deposits_export.csv'
-    link.click()
-    URL.revokeObjectURL(url)
-    ElMessage.success('导出成功')
-  } catch (e) {
-    ElMessage.error('导出失败')
-  }
+  await exportCsv(() => exportDepositsCSV(), 'deposits_export.csv')
 }
 
 function approve(row) {

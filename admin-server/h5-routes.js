@@ -6,6 +6,7 @@ import { getGameUrl } from './pp-integration.js'
 import { getCachedGames, CATEGORY_MAP } from './services/sk7755/gameSync.js'
 import { login as sk7755Login } from './services/sk7755/client.js'
 import { launchGame as providerLaunchGame } from './providers/registry.js'
+import { parsePage } from './utils/http.js'
 
 // Helper: get category label for a game
 function getCategoryLabel(categoryId) {
@@ -317,9 +318,7 @@ router.post('/wallet/withdraw', h5Auth, (req, res) => {
 
 // GET /api/h5/wallet/transactions
 router.get('/wallet/transactions', h5Auth, (req, res) => {
-  const page = Math.max(1, parseInt(req.query.page) || 1)
-  const limit = 20
-  const offset = (page - 1) * limit
+  const { page, pageSize: limit, offset } = parsePage(req.query, 20)
   const type = req.query.type
 
   let query = 'SELECT * FROM h5_transactions WHERE member_id = ?'
@@ -355,9 +354,7 @@ router.get('/wallet/transactions', h5Auth, (req, res) => {
 
 // GET /api/h5/games — unified game list, provider names stripped
 router.get('/games', (req, res) => {
-  const page = Math.max(1, parseInt(req.query.page) || 1)
-  const limit = 50
-  const offset = (page - 1) * limit
+  const { page, pageSize: limit, offset } = parsePage(req.query, 50)
   const category = req.query.category
   const search = req.query.search
   const catMap = getCategoryMap()
@@ -677,9 +674,7 @@ router.post('/promotions/:id/claim', h5Auth, (req, res) => {
 
 // GET /api/h5/messages
 router.get('/messages', h5Auth, (req, res) => {
-  const page = Math.max(1, parseInt(req.query.page) || 1)
-  const limit = 20
-  const offset = (page - 1) * limit
+  const { page, pageSize: limit, offset } = parsePage(req.query, 20)
 
   const total = db.prepare('SELECT COUNT(*) as count FROM h5_user_messages WHERE member_id = ?')
     .get(req.h5user.memberId).count
@@ -751,9 +746,7 @@ router.get('/vip/info', h5Auth, (req, res) => {
 
 // GET /api/h5/rakeback/records
 router.get('/rakeback/records', h5Auth, (req, res) => {
-  const page = Math.max(1, parseInt(req.query.page) || 1)
-  const limit = 20
-  const offset = (page - 1) * limit
+  const { page, pageSize: limit, offset } = parsePage(req.query, 20)
 
   const total = db.prepare('SELECT COUNT(*) as count FROM rakeback_records WHERE member = ?')
     .get(req.h5user.memberId).count

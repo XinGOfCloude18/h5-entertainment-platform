@@ -370,6 +370,7 @@
 import { ref, computed, onMounted, nextTick } from 'vue'
 import { getMembers, getMemberDetail, memberAction, updateMemberVip, updateMemberTags, forceLogoutMember, adjustMemberBalance } from '@/api/members'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { formatCompact as formatAmount } from '@/utils/format'
 
 const search = ref('')
 const agentFilter = ref('')
@@ -532,11 +533,6 @@ const allTransactions = computed(() => {
   const txs = [...(detailData.value.transactions || []), ...(detailData.value.h5Transactions || [])]
   return txs.sort((a, b) => ((b.time || b.created_at) || '').localeCompare((a.time || a.created_at) || ''))
 })
-
-function formatAmount(val) {
-  if (val >= 10000) return (val / 10000).toFixed(1) + '万'
-  return val.toLocaleString()
-}
 
 function tagType(tag) {
   if (tag === '高价值' || tag === 'VIP') return 'warning'

@@ -281,7 +281,7 @@
               </div>
             </div>
             <div class="change-amount" :class="{ positive: item.amount > 0 }">
-              {{ item.amount > 0 ? '+' : '' }}{{ item.amount.toFixed(2) }} USDT
+              {{ formatSigned(item.amount) }} USDT
             </div>
           </div>
           <van-empty v-if="!accountChangeList.length" :description="t('common.noData')" />
@@ -299,6 +299,7 @@ import { useUserStore } from '@/stores/user'
 import { useWalletStore } from '@/stores/wallet'
 import { useNotificationStore } from '@/stores/notification'
 import { showToast } from 'vant'
+import { formatSigned } from '@/utils/format'
 
 const { t, locale } = useI18n()
 const router = useRouter()

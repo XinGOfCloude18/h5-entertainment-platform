@@ -33,6 +33,7 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import request from '@/utils/request'
+import { formatAmount } from '@/utils/format'
 
 const loading = ref(false)
 const activeDays = ref(30)
@@ -45,11 +46,6 @@ const quickDates = [
 
 const stats = ref({ totalBets: 0, betAmount: 0, winLoss: 0, rebate: 0 })
 const reportData = ref([])
-
-function formatAmount(val) {
-  const n = Number(val) || 0
-  return n.toLocaleString('zh-CN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
-}
 
 async function selectRange(days) {
   activeDays.value = days
