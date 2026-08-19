@@ -73,6 +73,28 @@ describe('stores/user', () => {
     await expect(store.login('13800000000', 'wrong')).rejects.toThrow(/登录已锁定/)
   })
 
+  it('login() clears an expired lockout before retrying', async () => {
+    localStorage.setItem('login_attempts', '5')
+    localStorage.setItem('lockout_until', String(Date.now() - 1000))
+    setActivePinia(createPinia())
+
+    loginApi.mockResolvedValue({ access_token: 'tok', user: { phone: '138****0000' } })
+
+    const store = useUserStore()
+    await expect(store.login('13800000000', 'pass')).resolves.toEqual({ success: true })
+    expect(localStorage.getItem('lockout_until')).toBeNull()
+    expect(localStorage.getItem('login_attempts')).toBeNull()
+  })
+
+  it('login() derives a masked phone when the API omits the user', async () => {
+    loginApi.mockResolvedValue({ access_token: 'tok' })
+
+    const store = useUserStore()
+    await store.login('13812345678', 'pass')
+
+    expect(store.user).toEqual({ phone: '138****5678' })
+  })
+
   it('register() stores token and user on success', async () => {
     registerApi.mockResolvedValue({
       access_token: 'reg-token',
