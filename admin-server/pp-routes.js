@@ -40,7 +40,7 @@ router.post('/games/launch', h5Auth, async (req, res) => {
     })
     if (String(result.error) !== '0' || !result.gameURL) {
       logError('pp game launch', new Error('PP error ' + result.error + ': ' + (result.description || 'no gameURL')))
-      return res.status(502).json({ error: 'Failed to get game URL', code: result.error, description: result.description })
+      return res.status(502).json({ error: 'Failed to get game URL' })
     }
     res.json({ success: true, gameUrl: result.gameURL })
   } catch (err) {

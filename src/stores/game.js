@@ -61,23 +61,35 @@ export const useGameStore = defineStore('game', () => {
     loading.value = true
     error.value = null
     try {
-      const res = await getGamesApi(params)
-      const list = res?.list || res
-      if (Array.isArray(list) && list.length) {
-        if (!params.category && !params.search) {
-          games.value = list
-        }
-        fetched.value = true
+      // Both catalogues are fetched independently so one failing feed still
+      // yields a usable list; only a total failure is propagated.
+      const [main, sk] = await Promise.allSettled([
+        fetchMainGames(params),
+        fetchSK7755Games()
+      ])
+      const failures = [main, sk].filter(r => r.status === 'rejected').map(r => r.reason)
+      failures.forEach(e => console.error('Games API failed', e))
+      if (failures.length === 2) {
+        error.value = failures[0]
+        throw failures[0]
       }
-      await fetchSK7755Games()
+      if (failures.length) error.value = failures[0]
       return games.value
-    } catch (e) {
-      error.value = e
-      console.error('Games API failed', e)
-      throw e
     } finally {
       loading.value = false
     }
+  }
+
+  async function fetchMainGames(params = {}) {
+    const res = await getGamesApi(params)
+    const list = res?.list || res
+    if (Array.isArray(list) && list.length) {
+      if (!params.category && !params.search) {
+        games.value = list
+      }
+      fetched.value = true
+    }
+    return games.value
   }
 
   async function fetchSK7755Games() {

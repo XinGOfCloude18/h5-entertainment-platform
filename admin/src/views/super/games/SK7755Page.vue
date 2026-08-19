@@ -146,8 +146,16 @@ async function handleSync() {
   syncing.value = true
   try {
     const res = await syncSK7755Games()
-    ElMessage.success(`同步完成，共 ${res.gameCount} 款游戏`)
-    lastSyncInfo.value = `最近同步: ${new Date().toLocaleString()} (${res.gameCount} 游戏)`
+    const failures = res.failures || []
+    if (failures.length) {
+      ElMessage.warning(
+        `部分同步失败，共 ${res.gameCount} 款游戏，失败平台: ${failures.map(f => f.platform).join(', ')}`
+      )
+    } else {
+      ElMessage.success(`同步完成，共 ${res.gameCount} 款游戏`)
+    }
+    lastSyncInfo.value = `最近同步: ${new Date().toLocaleString()} (${res.gameCount} 游戏` +
+      (failures.length ? `, ${failures.length} 个平台失败)` : ')')
     await fetchPlatforms()
   } catch (err) {
     ElMessage.error('同步失败: ' + (err.error || err.message || ''))
